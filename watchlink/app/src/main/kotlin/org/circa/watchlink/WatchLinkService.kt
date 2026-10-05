@@ -148,6 +148,39 @@ class WatchLinkService : Service(), BleServer.Listener {
     }
 
     /**
+     * Follow the phone's UTC offset (GB's `E.setTimeZone`), but only when the user asked for an automatic time
+     * zone: this watch has no SIM and no location provider, so time_zone_detector reports NOT_SUPPORTED and the
+     * setting alone leaves it in GMT. TzPolicy picks the zone; AlarmManager.setTimeZone needs SET_TIME_ZONE
+     * (privileged - declared in the manifest and allowlisted by the device build), so a missing grant is logged
+     * and otherwise ignored. Called after every setTime line, i.e. on each connect and periodic time sync.
+     */
+    private fun applyPhoneTimeZone() {
+        val now = log.now()
+        val current = java.util.TimeZone.getDefault().id
+        val auto = try {
+            Settings.Global.getInt(contentResolver, Settings.Global.AUTO_TIME_ZONE, 0) == 1
+        } catch (e: Exception) {
+            Log.i(TAG, "tz: auto_time_zone unreadable: $e")
+            false
+        }
+        val phone = if (log.tzHours.isNaN()) null else Math.round(log.tzHours * 3_600_000.0).toInt()
+        val phoneText = if (phone == null) "?" else "" + phone / 3_600_000.0
+        val id = TzPolicy.choose(auto, current, phone, now)
+        if (id == null) {
+            Log.i(TAG, "tz phone=$phoneText current=$current action=" + (if (!auto) "off" else "unknown"))
+        } else if (id == current) {
+            Log.i(TAG, "tz phone=$phoneText current=$current action=keep")
+        } else {
+            try {
+                getSystemService(AlarmManager::class.java).setTimeZone(id)
+                Log.i(TAG, "tz phone=$phoneText current=$current action=set $id")
+            } catch (e: Exception) {
+                Log.i(TAG, "tz phone=$phoneText current=$current action=set $id failed: $e")
+            }
+        }
+    }
+
+    /**
      * Foreground with connectedDevice|health if the platform allows it from the current context, else connectedDevice
      * only, so the BLE link always comes up (e.g. from BOOT_COMPLETED). health is added later by ensureHealth().
      */
@@ -441,6 +474,7 @@ class WatchLinkService : Service(), BleServer.Listener {
                 val delta = log.sync(input.unixSec, input.tzHours)
                 Log.i(TAG, "IN.time setTime=" + input.unixSec + " tz=" + input.tzHours + " correction=" + delta + " ms"
                         + " (watch system clock off by " + (log.now() - System.currentTimeMillis()) + " ms)")
+                applyPhoneTimeZone()
                 if (Math.abs(delta) > 60_000) {
                     log.lastClosedEnd = 0
                     nextHrSampleAt = 0

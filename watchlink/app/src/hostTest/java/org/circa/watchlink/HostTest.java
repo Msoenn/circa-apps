@@ -508,6 +508,9 @@ public final class HostTest {
         BleNameTest.run();
         NotifIconTest.run();
 
+        // 6h. System time zone from the phone's UTC offset (GB setTime / E.setTimeZone)
+        TzPolicyTest.run();
+
         // 7. Fuzz: random values as GB encoded them, random chunking
         int fuzz = 0;
         for (Golden g : GOLDEN.values()) {

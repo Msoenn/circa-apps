@@ -18,9 +18,11 @@ What it does:
 
 Phone to watch: Gadgetbridge writes `\x10GB({...})\n`, a JavaScript object literal (strings may use `\xHH`, octal,
 `\uXXXX` escapes and `atob("...")`). `LineAssembler` reassembles GATT writes into lines, `JsParser`/`Proto` parse them.
-`setTime(...)` lines set WatchLink's clock and time zone. Watch to phone: JSON lines framed as `\r\n{json}\r\n`, as a
-Bangle.js sends them. After a connect the watch sends `ver` (`fw`, `hw`) and a status line, padded to the MTU, as a
-real Bangle.js does.
+`setTime(...)` lines set WatchLink's clock and time zone. When Settings.Global `auto_time_zone` is on, WatchLink also
+applies the phone's UTC offset to the system zone (`TzPolicy` + `AlarmManager.setTimeZone`), since this watch has no
+SIM and no location provider and Android's detector reports NOT_SUPPORTED; a zone that already matches is kept.
+Watch to phone: JSON lines framed as `\r\n{json}\r\n`, as a Bangle.js sends them. After a connect the watch sends
+`ver` (`fw`, `hw`) and a status line, padded to the MTU, as a real Bangle.js does.
 
 The advertised name is `Bangle.js` plus four hex digits. Gadgetbridge only offers a device as a Bangle.js by that
 name. If the Bluetooth adapter already has such a name it is kept, so a paired phone keeps knowing the watch.
@@ -41,5 +43,6 @@ and track sync logic.
 
 ## Signing
 
-Signed with the AOSP **testkey**, not the platform key: WatchLink processes input from the phone over Bluetooth and
-needs no platform signature permissions. Its providers check callers by UID (see the data contract).
+Signed with the AOSP **testkey**, not the platform key: WatchLink processes input from the phone over Bluetooth, and
+its one privileged power (`SET_TIME_ZONE`, to follow the phone's UTC offset) is granted by the device's privapp
+allowlist. Its providers check callers by UID (see the data contract).
