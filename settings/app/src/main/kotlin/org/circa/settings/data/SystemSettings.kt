@@ -84,34 +84,51 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
         const val ACTION_PICK_FACE = "org.circa.intent.action.PICK_FACE"
     }
 
-    fun read(): SettingsSnapshot = SettingsSnapshot(
-        qs = quick.read(),
-        airplane = Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
-        screenTimeoutMs = Settings.System.getInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000),
-        alwaysOn = GestureModel.parse(getRaw(SettingKey(SettingsTable.SECURE, ALWAYS_ON_KEY))),
-        gestures = GestureModel.rows(::exists, ::getRaw),
-        tiltWake = TiltWakeModel.resolve(
+    fun read(): SettingsSnapshot {
+        migrateTiltWake()
+        return SettingsSnapshot(
+            qs = quick.read(),
+            airplane = Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
+            screenTimeoutMs = Settings.System.getInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000),
+            alwaysOn = GestureModel.parse(getRaw(SettingKey(SettingsTable.SECURE, ALWAYS_ON_KEY))),
+            gestures = GestureModel.rows(::exists, ::getRaw),
+            tiltWake = TiltWakeModel.resolve(
+                getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.SECURE_KEY)),
+                getRaw(SettingKey(SettingsTable.GLOBAL, TiltWakeModel.LEGACY_GLOBAL_KEY)),
+                getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.MIGRATED_KEY)),
+            ),
+            ringer = Ringer.fromMode(
+                context.getSystemService(AudioManager::class.java)?.ringerMode ?: Ringer.SOUND.mode,
+            ),
+            touchVibration = Settings.System.getInt(resolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0,
+            deviceSecure = context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true,
+            lockAfterMs = getRaw(SettingKey(SettingsTable.SECURE, LOCK_AFTER_KEY))?.toLongOrNull() ?: 0L,
+            accent = Accent.fromArgb(
+                getRaw(SettingKey(SettingsTable.SECURE, SharedKeys.ACCENT))?.trim()?.toIntOrNull(),
+            ) ?: Accent.DEFAULT,
+            lockWhenTakenOff = SharedKeys.parseLockWhenTakenOff(
+                getRaw(SettingKey(SettingsTable.SECURE, SharedKeys.LOCK_WHEN_TAKEN_OFF)),
+            ),
+            batteryPercent = context.getSystemService(BatteryManager::class.java)
+                ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                ?.takeIf { it in 0..100 },
+            profile = readProfile(),
+            longPress = LongPressAction.fromRaw(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.LONG_PRESS))),
+        )
+    }
+
+    /**
+     * The one-time `Low -> Medium` migration: Low was the old default and was never an explicit
+     * choice, so it becomes Medium once (recorded in `circa_tilt_wake_migrated`). The launcher
+     * applies the same migration from its own read path.
+     */
+    private fun migrateTiltWake() {
+        val writes = TiltWakeModel.migrationWrites(
             getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.SECURE_KEY)),
-            getRaw(SettingKey(SettingsTable.GLOBAL, TiltWakeModel.LEGACY_GLOBAL_KEY)),
-        ),
-        ringer = Ringer.fromMode(
-            context.getSystemService(AudioManager::class.java)?.ringerMode ?: Ringer.SOUND.mode,
-        ),
-        touchVibration = Settings.System.getInt(resolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0,
-        deviceSecure = context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true,
-        lockAfterMs = getRaw(SettingKey(SettingsTable.SECURE, LOCK_AFTER_KEY))?.toLongOrNull() ?: 0L,
-        accent = Accent.fromArgb(
-            getRaw(SettingKey(SettingsTable.SECURE, SharedKeys.ACCENT))?.trim()?.toIntOrNull(),
-        ) ?: Accent.DEFAULT,
-        lockWhenTakenOff = SharedKeys.parseLockWhenTakenOff(
-            getRaw(SettingKey(SettingsTable.SECURE, SharedKeys.LOCK_WHEN_TAKEN_OFF)),
-        ),
-        batteryPercent = context.getSystemService(BatteryManager::class.java)
-            ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            ?.takeIf { it in 0..100 },
-        profile = readProfile(),
-        longPress = LongPressAction.fromRaw(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.LONG_PRESS))),
-    )
+            getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.MIGRATED_KEY)),
+        )
+        for ((name, value) in writes) putRaw(SettingKey(SettingsTable.SECURE, name), value)
+    }
 
     private fun secure(name: String) = getRaw(SettingKey(SettingsTable.SECURE, name))
 

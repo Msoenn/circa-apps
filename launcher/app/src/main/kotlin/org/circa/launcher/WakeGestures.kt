@@ -35,9 +35,9 @@ import org.circa.launcher.model.WearGestureLogic
  *
  * * **Tilt-to-wake** — `android.sensor.wrist_tilt_gesture` (hidden Android type 26) has a wake-up
  *   variant and no permission requirement. Its level is `Settings.Secure circa_tilt_wake` (Off / Low /
- *   Normal, Circa Settings > Gestures; [TiltSensitivity.resolve] falls back to the old
- *   `Settings.Global.ambient_tilt_to_wake` toggle) and it is registered only while the display is off
- *   or dozing - and never while theater mode (`Settings.Global.THEATER_MODE_ON`) is on, where only
+ *   Medium / High, Circa Settings > Gestures; [TiltSensitivity.resolve] falls back to the old
+ *   `Settings.Global.ambient_tilt_to_wake` toggle and applies the one-time Low -> Medium migration).
+ *   It is registered only while the display is off or dozing - and never while theater mode (`Settings.Global.THEATER_MODE_ON`) is on, where only
  *   POWER may wake the screen (launcher/README.md). The hub's gesture alone
  *   fires on arm swings, so a raise is only a *candidate*: [TiltGlance] samples the accelerometer for
  *   a few hundred ms and calls the framework's own gesture wake
@@ -122,7 +122,7 @@ class WakeGestures(private val context: Context) {
         }
 
         // Circa Settings' Tilt-to-wake level (and the legacy toggle) can change from outside.
-        for (uri in listOf(Settings.Global.getUriFor(TILT_SETTING), Settings.Secure.getUriFor(TILT_LEVEL_SETTING))) {
+        for (uri in listOf(Settings.Global.getUriFor(TILT_SETTING), Settings.Secure.getUriFor(TiltSensitivity.LEVEL_KEY))) {
             resolver.registerContentObserver(
                 uri,
                 false,
@@ -374,11 +374,23 @@ class WakeGestures(private val context: Context) {
         return explicit ?: runCatching { manager.getDefaultSensor(type) }.getOrNull()
     }
 
-    /** `Settings.Secure circa_tilt_wake`, else the legacy `Settings.Global.ambient_tilt_to_wake` toggle. */
-    private fun tiltLevel(): TiltSensitivity = TiltSensitivity.resolve(
-        runCatching { Settings.Secure.getString(resolver, TILT_LEVEL_SETTING) }.getOrNull(),
-        runCatching { Settings.Global.getString(resolver, TILT_SETTING) }.getOrNull(),
-    )
+    /** `Settings.Secure circa_tilt_wake` (applying the one-time Low -> Medium migration), else the
+     *  legacy `Settings.Global.ambient_tilt_to_wake` toggle. */
+    private fun tiltLevel(): TiltSensitivity {
+        val secure = secureSetting(TiltSensitivity.LEVEL_KEY)
+        val migrated = secureSetting(TiltSensitivity.MIGRATION_KEY)
+        for ((name, value) in TiltSensitivity.migrationWrites(secure, migrated)) {
+            runCatching { Settings.Secure.putString(resolver, name, value) }
+        }
+        return TiltSensitivity.resolve(
+            secure,
+            runCatching { Settings.Global.getString(resolver, TILT_SETTING) }.getOrNull(),
+            migrated,
+        )
+    }
+
+    private fun secureSetting(name: String): String? =
+        runCatching { Settings.Secure.getString(resolver, name) }.getOrNull()
 
     /** `Settings.Global.THEATER_MODE_ON` (hidden from the public SDK), 1 = on. */
     private fun theaterModeOn(): Boolean =
@@ -416,9 +428,6 @@ class WakeGestures(private val context: Context) {
 
         /** `Settings.Global.ambient_tilt_to_wake`; the old Gestures toggle (1 = on), the fallback. */
         private const val TILT_SETTING = "ambient_tilt_to_wake"
-
-        /** `Settings.Secure circa_tilt_wake`: "0" Off, "1" Low, "2" Normal (Circa Settings > Gestures). */
-        const val TILT_LEVEL_SETTING = "circa_tilt_wake"
 
         /** Hidden `Settings.Global.THEATER_MODE_ON`; SystemUI's Theater mode tile writes it. */
         private const val THEATER_SETTING = "theater_mode_on"

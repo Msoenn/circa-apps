@@ -45,9 +45,9 @@ class TiltGateTest {
     // ---- accept --------------------------------------------------------------------------------
 
     @Test
-    fun lookingHoldIsAcceptedAtBothLevels() {
+    fun lookingHoldIsAcceptedAtEveryLevel() {
         val accel = hold(20.0)
-        for (t in listOf(TiltGate.LOW, TiltGate.NORMAL)) {
+        for (t in listOf(TiltGate.LOW, TiltGate.MEDIUM, TiltGate.HIGH)) {
             val v = TiltGate.evaluate(accel, stillGyro(), start, t)
             assertTrue("$t -> ${v.reason}", v.accept)
             assertEquals(GateReason.OK, v.reason)
@@ -79,17 +79,18 @@ class TiltGateTest {
 
     @Test
     fun watchHeldVerticalIsNotFacingUp() {
-        // Face vertical (70 degrees from LOOK): outside both cones.
-        val v = TiltGate.evaluate(hold(90.0), stillGyro(), start, TiltGate.NORMAL)
+        // Face vertical (70 degrees from LOOK): outside every cone.
+        val v = TiltGate.evaluate(hold(90.0), stillGyro(), start, TiltGate.HIGH)
         assertFalse(v.accept)
         assertEquals(GateReason.FACE, v.reason)
     }
 
     @Test
-    fun wideTiltPassesNormalButNotLow() {
+    fun wideTiltPassesHighButNotLowOrMedium() {
         val accel = hold(62.0) // ~42 degrees from LOOK
         assertEquals(GateReason.FACE, TiltGate.evaluate(accel, stillGyro(), start, TiltGate.LOW).reason)
-        assertTrue(TiltGate.evaluate(accel, stillGyro(), start, TiltGate.NORMAL).accept)
+        assertEquals(GateReason.FACE, TiltGate.evaluate(accel, stillGyro(), start, TiltGate.MEDIUM).reason)
+        assertTrue(TiltGate.evaluate(accel, stillGyro(), start, TiltGate.HIGH).accept)
     }
 
     @Test
@@ -97,7 +98,7 @@ class TiltGateTest {
         // Hand pointing at the floor: the accelerometer's "up" is -X; face sideways.
         val r = Random(3)
         val accel = trace { Triple(-g + r.nextDouble(-0.1, 0.1), r.nextDouble(-0.1, 0.1), 0.5) }
-        val v = TiltGate.evaluate(accel, stillGyro(), start, TiltGate.NORMAL)
+        val v = TiltGate.evaluate(accel, stillGyro(), start, TiltGate.HIGH)
         assertFalse(v.accept)
         assertEquals(GateReason.FACE, v.reason)
     }
@@ -114,18 +115,52 @@ class TiltGateTest {
             Triple(lin, g * sin(rad), g * cos(rad) + lin * 0.5)
         }
         val gyro = trace { t -> Triple(2.0 * cos(2 * PI * t), 0.3, 0.0) }
-        for (t in listOf(TiltGate.LOW, TiltGate.NORMAL)) {
+        for (t in listOf(TiltGate.LOW, TiltGate.MEDIUM, TiltGate.HIGH)) {
             assertFalse("$t", TiltGate.evaluate(accel, gyro, start, t).accept)
         }
     }
 
     @Test
-    fun tremorAboveLowButBelowNormalSplitsTheLevels() {
-        val accel = hold(20.0, noise = 1.0, seed = 11) // uniform +-1 per axis -> 3-D RMS ~1.0
+    fun tremorAboveLowPassesMediumAndHigh() {
+        val accel = hold(20.0, noise = 1.17, seed = 11) // uniform +-1.17 per axis -> 3-D RMS ~1.0 (Low 0.9 < x < Medium 1.1)
         val f = TiltGate.evaluate(accel, stillGyro(), start, TiltGate.LOW).features
-        assertTrue("accel rms ${f.accelRms}", f.accelRms > TiltGate.LOW.maxAccelRms && f.accelRms < TiltGate.NORMAL.maxAccelRms)
+        assertTrue("accel rms ${f.accelRms}", f.accelRms > TiltGate.LOW.maxAccelRms && f.accelRms < TiltGate.MEDIUM.maxAccelRms)
         assertEquals(GateReason.MOTION, TiltGate.evaluate(accel, stillGyro(), start, TiltGate.LOW).reason)
-        assertTrue(TiltGate.evaluate(accel, stillGyro(), start, TiltGate.NORMAL).accept)
+        assertTrue(TiltGate.evaluate(accel, stillGyro(), start, TiltGate.MEDIUM).accept)
+        assertTrue(TiltGate.evaluate(accel, stillGyro(), start, TiltGate.HIGH).accept)
+    }
+
+    // ---- medium: the real-wear rows the retune was built from ------------------------------------
+
+    /** One telemetry row: features as `TiltGate.features` would compute them, mean at rest (|a| = g). */
+    private fun row(angle: Double, accelRms: Double, gyroRms: Double) = TiltFeatures(
+        n = 15,
+        spanMs = 340,
+        ax = 0.0,
+        ay = 0.0,
+        az = g,
+        amag = g,
+        angleDeg = angle,
+        accelRms = accelRms,
+        gyroRms = gyroRms,
+    )
+
+    @Test
+    fun mediumAcceptsTheRealGlancesLowRejected() {
+        // 2026-10-04 on-watch telemetry: both were rejected by Low (motion at 0.93, face at 38.9°).
+        for (f in listOf(row(18.9, 0.93, 0.28), row(38.9, 0.27, 0.129))) {
+            assertFalse("Low must reject $f", TiltGate.decide(f, TiltGate.LOW).accept)
+            val v = TiltGate.decide(f, TiltGate.MEDIUM)
+            assertTrue("$f -> ${v.reason}", v.accept)
+            assertEquals(GateReason.OK, v.reason)
+        }
+    }
+
+    @Test
+    fun mediumRejectsTheRealSwingRow() {
+        val v = TiltGate.decide(row(49.7, 9.48, 3.9), TiltGate.MEDIUM)
+        assertFalse(v.accept)
+        assertEquals(GateReason.FACE, v.reason)
     }
 
     @Test
@@ -151,7 +186,10 @@ class TiltGateTest {
     fun windowCompletesAtTheLevelsWindow() {
         assertFalse(TiltGate.windowComplete(start + 449_000_000L, start, TiltGate.LOW))
         assertTrue(TiltGate.windowComplete(start + 450_000_000L, start, TiltGate.LOW))
-        assertTrue(TiltGate.windowComplete(start + 300_000_000L, start, TiltGate.NORMAL))
+        assertFalse(TiltGate.windowComplete(start + 449_000_000L, start, TiltGate.MEDIUM))
+        assertTrue(TiltGate.windowComplete(start + 450_000_000L, start, TiltGate.MEDIUM))
+        assertFalse(TiltGate.windowComplete(start + 449_000_000L, start, TiltGate.HIGH))
+        assertTrue(TiltGate.windowComplete(start + 450_000_000L, start, TiltGate.HIGH))
     }
 
     @Test
@@ -166,15 +204,46 @@ class TiltGateTest {
 
     @Test
     fun sensitivityResolvesSecureKeyThenLegacyToggle() {
-        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve(null, null))
-        assertEquals(TiltSensitivity.LOW, TiltSensitivity.resolve(null, "1"))
-        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve(null, "0"))
-        assertEquals(TiltSensitivity.NORMAL, TiltSensitivity.resolve("2", "0"))
-        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve("0", "1"))
-        assertEquals(TiltSensitivity.LOW, TiltSensitivity.resolve("garbage", "1"))
-        assertEquals(TiltSensitivity.LOW, TiltSensitivity.resolve("7", "1"))
+        // Unset (or unknown) means the new default, Medium; the legacy toggle only forces Off at "0".
+        assertEquals(TiltSensitivity.MEDIUM, TiltSensitivity.resolve(null, null, null))
+        assertEquals(TiltSensitivity.MEDIUM, TiltSensitivity.resolve(null, "1", null))
+        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve(null, "0", null))
+        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve("0", "1", null))
+        assertEquals(TiltSensitivity.MEDIUM, TiltSensitivity.resolve("garbage", "1", null))
+        assertEquals(TiltSensitivity.OFF, TiltSensitivity.resolve("7", "0", null))
+        // High keeps the legacy "normal" value 2; Medium takes the free value 3.
+        assertEquals(TiltSensitivity.HIGH, TiltSensitivity.resolve("2", "0", null))
+        assertEquals(TiltSensitivity.HIGH, TiltSensitivity.resolve("normal", "0", null))
+        assertEquals(TiltSensitivity.MEDIUM, TiltSensitivity.resolve("3", "0", null))
         assertNull(TiltGate.thresholds(TiltSensitivity.OFF))
         assertEquals(TiltGate.LOW, TiltGate.thresholds(TiltSensitivity.LOW))
+        assertEquals(TiltGate.MEDIUM, TiltGate.thresholds(TiltSensitivity.MEDIUM))
+        assertEquals(TiltGate.HIGH, TiltGate.thresholds(TiltSensitivity.HIGH))
+    }
+
+    @Test
+    fun storedLowMigratesToMediumOnce() {
+        // The old default was Low and was never chosen explicitly: it reads as Medium until the
+        // one-time migration has run (flag set).
+        assertEquals(TiltSensitivity.MEDIUM, TiltSensitivity.resolve("1", null, null))
+        assertEquals(TiltSensitivity.LOW, TiltSensitivity.resolve("1", null, "1"))
+        assertEquals(
+            mapOf(
+                TiltSensitivity.LEVEL_KEY to "3",
+                TiltSensitivity.MIGRATION_KEY to "1",
+            ),
+            TiltSensitivity.migrationWrites("1", null),
+        )
+        assertEquals(emptyMap<String, String>(), TiltSensitivity.migrationWrites("1", "1"))
+        // Anything else only records that the migration has run, so a later explicit Low is honoured.
+        assertEquals(
+            mapOf(TiltSensitivity.MIGRATION_KEY to "1"),
+            TiltSensitivity.migrationWrites("2", null),
+        )
+        assertEquals(
+            mapOf(TiltSensitivity.MIGRATION_KEY to "1"),
+            TiltSensitivity.migrationWrites(null, null),
+        )
     }
 
     // ---- wrist-down ----------------------------------------------------------------------------

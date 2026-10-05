@@ -5,19 +5,67 @@ import kotlin.math.sqrt
 
 /**
  * Tilt-to-wake sensitivity (Circa Settings > Gestures > Tilt-to-wake). Stored as `Settings.Secure
- * circa_tilt_wake` = "0"/"1"/"2"; before that key exists the old Gestures toggle
- * `Settings.Global ambient_tilt_to_wake` = 1 means [LOW] (the strict gate is the default), anything
- * else [OFF]. Circa Settings writes both keys (the global one as 0/1) so older readers stay right.
+ * circa_tilt_wake` = "0"/"1"/"3"/"2" (Off / Low / Medium / High). [HIGH] keeps the legacy "Normal"
+ * value 2 so an existing stored choice survives the rename; the new default [MEDIUM] takes the free
+ * value 3. The old Gestures toggle `Settings.Global ambient_tilt_to_wake` was a plain on/off (on =
+ * the old implicit [LOW]); it only turns tilt-to-wake [OFF] when it is explicitly 0. Circa Settings
+ * writes both keys (the global one as 0/1) so older readers stay right.
  */
 enum class TiltSensitivity(val value: Int, val id: String) {
     OFF(0, "off"),
     LOW(1, "low"),
-    NORMAL(2, "normal");
+    MEDIUM(3, "medium"),
+    HIGH(2, "high");
 
     companion object {
-        fun resolve(secureRaw: String?, legacyGlobalRaw: String?): TiltSensitivity {
-            secureRaw?.trim()?.toIntOrNull()?.let { v -> entries.firstOrNull { it.value == v }?.let { return it } }
-            return if (legacyGlobalRaw?.trim() == "1") LOW else OFF
+        /** `Settings.Secure circa_tilt_wake`. */
+        const val LEVEL_KEY = "circa_tilt_wake"
+
+        /** Records that the one-time Low -> Medium migration has run (any stored value = done). */
+        const val MIGRATION_KEY = "circa_tilt_wake_migrated"
+
+        /**
+         * A stored level: the secure key's number, or - for a value written by an older build - its
+         * name ("off"/"low"/"medium"/"high"; "normal" is the pre-rename name of [HIGH]).
+         */
+        fun parse(raw: String?): TiltSensitivity? {
+            val s = raw?.trim() ?: return null
+            s.toIntOrNull()?.let { v -> return entries.firstOrNull { it.value == v } }
+            return when (s.lowercase()) {
+                "off" -> OFF
+                "low" -> LOW
+                "medium" -> MEDIUM
+                "high", "normal" -> HIGH
+                else -> null
+            }
+        }
+
+        /**
+         * The effective level for the stored values. An unset or unknown secure key means [MEDIUM]
+         * (the new default); the legacy global toggle only turns it [OFF] when it is explicitly 0.
+         * A stored [LOW] whose one-time migration has not run ([migratedRaw] null) is the old
+         * implicit default and reads as [MEDIUM]: Low *was* the default, so it was never chosen.
+         */
+        fun resolve(secureRaw: String?, legacyGlobalRaw: String?, migratedRaw: String?): TiltSensitivity {
+            val stored = parse(secureRaw)
+            if (stored != null) {
+                if (stored == LOW && migratedRaw == null) return MEDIUM
+                return stored
+            }
+            return if (legacyGlobalRaw?.trim() == "0") OFF else MEDIUM
+        }
+
+        /**
+         * The secure-key writes of the one-time `Low -> Medium` migration, empty once it has run:
+         * [MIGRATION_KEY] is always written so a later explicit Low is honoured, the level itself
+         * only while it is still the old default [LOW].
+         */
+        fun migrationWrites(secureRaw: String?, migratedRaw: String?): Map<String, String> {
+            if (migratedRaw != null) return emptyMap()
+            return buildMap {
+                if (parse(secureRaw) == LOW) put(LEVEL_KEY, MEDIUM.value.toString())
+                put(MIGRATION_KEY, "1")
+            }
         }
     }
 }
@@ -103,32 +151,52 @@ object TiltGate {
      */
     val LOOK: DoubleArray = unit(doubleArrayOf(0.0, 0.34, 0.94))
 
-    /** The strict default: a clear "face toward me, held" pose. */
+    /**
+     * All three levels sit inside the gap between the first Low (35°, 0.6, 0.6: "never wakes") and the
+     * first Normal (50°, 1.2, 1.2, 300 ms window: "always awake"), user feedback 2026-10-04. Same 450 ms window
+     * and settle for every level; only the cone and the motion limits step up.
+     */
     val LOW = TiltThresholds(
         settleMs = 100,
         windowMs = 450,
         minSamples = 6,
-        coneDeg = 35.0,
-        maxAccelRms = 0.6,
-        maxGyroRms = 0.6,
+        coneDeg = 38.0,
+        maxAccelRms = 0.9,
+        maxGyroRms = 0.8,
         gravityTolerance = 1.5,
     )
 
-    /** Looser, still gated: a wider cone and more motion allowed, and a shorter wait. */
-    val NORMAL = TiltThresholds(
-        settleMs = 50,
-        windowMs = 300,
-        minSamples = 4,
-        coneDeg = 50.0,
-        maxAccelRms = 1.2,
-        maxGyroRms = 1.2,
-        gravityTolerance = 2.5,
+    /**
+     * The retuned default (2026-10-04 telemetry): Low's sampling window and settle, a wider cone and
+     * more motion allowed, so real glances at 5-40° with accel RMS up to 1.1 and gyro up to 0.9 pass
+     * while arm swings (3-4 m/s² linear) still fail. Gravity stays as strict as Low's.
+     */
+    val MEDIUM = TiltThresholds(
+        settleMs = 100,
+        windowMs = 450,
+        minSamples = 6,
+        coneDeg = 40.0,
+        maxAccelRms = 1.1,
+        maxGyroRms = 0.9,
+        gravityTolerance = 1.5,
+    )
+
+    /** Loosest level, still well short of the first Normal: the same window as Low and Medium. */
+    val HIGH = TiltThresholds(
+        settleMs = 100,
+        windowMs = 450,
+        minSamples = 6,
+        coneDeg = 44.0,
+        maxAccelRms = 1.3,
+        maxGyroRms = 1.0,
+        gravityTolerance = 2.0,
     )
 
     fun thresholds(level: TiltSensitivity): TiltThresholds? = when (level) {
         TiltSensitivity.OFF -> null
         TiltSensitivity.LOW -> LOW
-        TiltSensitivity.NORMAL -> NORMAL
+        TiltSensitivity.MEDIUM -> MEDIUM
+        TiltSensitivity.HIGH -> HIGH
     }
 
     /**

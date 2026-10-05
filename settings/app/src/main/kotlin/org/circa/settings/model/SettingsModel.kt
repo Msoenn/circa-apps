@@ -137,21 +137,65 @@ enum class Gesture(val id: String, val label: String, val candidates: List<Setti
 /** A gesture that exists on this build: the key that backs it and its current value. */
 data class GestureRow(val gesture: Gesture, val key: SettingKey, val on: Boolean)
 
-/** Tilt-to-wake sensitivity; shared with the launcher through Settings.Secure `circa_tilt_wake` ("0"/"1"/"2"). */
+/**
+ * Tilt-to-wake sensitivity; shared with the launcher through Settings.Secure `circa_tilt_wake`.
+ * Values are `0`/`1`/`3`/`2` = Off / Low / Medium / High: High keeps the legacy "Normal" value 2 so
+ * an existing stored choice survives the rename, and Medium (the default) takes the free value 3.
+ */
 enum class TiltWake(val value: Int, val label: String, val hint: String) {
     OFF(0, "Off", "Press or tap only"),
-    LOW(1, "Low", "Face up and held"),
-    NORMAL(2, "Normal", "Easier to wake"),
+    LOW(1, "Low", "Face up and still"),
+    MEDIUM(3, "Medium", "Raise to look"),
+    HIGH(2, "High", "Easier to wake"),
 }
 
 object TiltWakeModel {
     const val SECURE_KEY = "circa_tilt_wake"
     const val LEGACY_GLOBAL_KEY = "ambient_tilt_to_wake"
 
-    /** Our key wins when it parses to 0/1/2; otherwise the old Global toggle ("1" = Low), else Off. */
-    fun resolve(secureRaw: String?, legacyGlobalRaw: String?): TiltWake =
-        secureRaw?.trim()?.toIntOrNull()?.let { v -> TiltWake.entries.firstOrNull { it.value == v } }
-            ?: if (legacyGlobalRaw?.trim() == "1") TiltWake.LOW else TiltWake.OFF
+    /** Records that the one-time Low -> Medium migration has run (any stored value = done). */
+    const val MIGRATED_KEY = "circa_tilt_wake_migrated"
+
+    /** A stored level: the secure key's number, or - for a value written by an older build - its name. */
+    fun parse(raw: String?): TiltWake? {
+        val s = raw?.trim() ?: return null
+        s.toIntOrNull()?.let { v -> return TiltWake.entries.firstOrNull { it.value == v } }
+        return when (s.lowercase()) {
+            "off" -> TiltWake.OFF
+            "low" -> TiltWake.LOW
+            "medium" -> TiltWake.MEDIUM
+            "high", "normal" -> TiltWake.HIGH
+            else -> null
+        }
+    }
+
+    /**
+     * The level to show. An unset or unknown secure key means [TiltWake.MEDIUM] (the new default);
+     * the legacy global toggle only turns it [TiltWake.OFF] when it is explicitly "0". A stored
+     * [TiltWake.LOW] whose one-time migration has not run ([migratedRaw] null) is the old implicit
+     * default and reads as [TiltWake.MEDIUM]: Low *was* the default, so it was never chosen.
+     */
+    fun resolve(secureRaw: String?, legacyGlobalRaw: String?, migratedRaw: String?): TiltWake {
+        val stored = parse(secureRaw)
+        if (stored != null) {
+            if (stored == TiltWake.LOW && migratedRaw == null) return TiltWake.MEDIUM
+            return stored
+        }
+        return if (legacyGlobalRaw?.trim() == "0") TiltWake.OFF else TiltWake.MEDIUM
+    }
+
+    /**
+     * The secure-key writes of the one-time `Low -> Medium` migration, empty once it has run:
+     * [MIGRATED_KEY] is always written so a later explicit Low is honoured, the level itself only
+     * while it is still the old default [TiltWake.LOW].
+     */
+    fun migrationWrites(secureRaw: String?, migratedRaw: String?): Map<String, String> {
+        if (migratedRaw != null) return emptyMap()
+        return buildMap {
+            if (parse(secureRaw) == TiltWake.LOW) put(SECURE_KEY, TiltWake.MEDIUM.value.toString())
+            put(MIGRATED_KEY, "1")
+        }
+    }
 
     /** What to keep `ambient_tilt_to_wake` at, for anything still reading the old toggle. */
     fun legacyValue(level: TiltWake): String = if (level == TiltWake.OFF) "0" else "1"

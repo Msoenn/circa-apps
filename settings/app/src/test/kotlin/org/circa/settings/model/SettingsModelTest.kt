@@ -64,18 +64,65 @@ class SettingsModelTest {
         assertFalse(rows.first { it.gesture == Gesture.TOUCH_TO_WAKE }.on)
     }
 
-    @Test fun tiltWakeUnsetIsOff() = assertEquals(TiltWake.OFF, TiltWakeModel.resolve(null, null))
-    @Test fun tiltWakeLegacyOneIsLow() = assertEquals(TiltWake.LOW, TiltWakeModel.resolve(null, "1"))
-    @Test fun tiltWakeLegacyZeroIsOff() = assertEquals(TiltWake.OFF, TiltWakeModel.resolve(null, "0"))
-    @Test fun tiltWakeSecureWinsOverLegacy() = assertEquals(TiltWake.NORMAL, TiltWakeModel.resolve("2", "0"))
-    @Test fun tiltWakeGarbageSecureFallsBack() {
-        assertEquals(TiltWake.LOW, TiltWakeModel.resolve("abc", "1"))
-        assertEquals(TiltWake.OFF, TiltWakeModel.resolve("7", "0"))
+    @Test fun tiltWakeHasFourOptions() {
+        assertEquals(
+            listOf("Off", "Low", "Medium", "High"),
+            TiltWake.entries.map { it.label },
+        )
+        assertEquals(
+            listOf("Press or tap only", "Face up and still", "Raise to look", "Easier to wake"),
+            TiltWake.entries.map { it.hint },
+        )
     }
+
+    @Test fun tiltWakeValuesKeepLegacyNormal() {
+        // High keeps the old "Normal" value 2 so a stored choice survives the rename; Medium 3 is new.
+        assertEquals(listOf(0, 1, 3, 2), TiltWake.entries.map { it.value })
+        assertEquals(TiltWake.HIGH, TiltWakeModel.parse("2"))
+        assertEquals(TiltWake.HIGH, TiltWakeModel.parse("normal"))
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.parse("3"))
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.parse("medium"))
+    }
+
+    @Test fun tiltWakeUnsetDefaultsToMedium() {
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.resolve(null, null, null))
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.resolve(null, "1", null))
+        assertEquals(TiltWake.OFF, TiltWakeModel.resolve(null, "0", null))
+        assertEquals(TiltWake.OFF, TiltWakeModel.resolve("7", "0", null))
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.resolve("abc", "1", null))
+    }
+
+    @Test fun tiltWakeSecureWinsOverLegacy() {
+        assertEquals(TiltWake.OFF, TiltWakeModel.resolve("0", "1", null))
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.resolve("3", "0", null))
+        assertEquals(TiltWake.HIGH, TiltWakeModel.resolve("2", "0", null))
+    }
+
+    @Test fun storedLowMigratesToMediumOnce() {
+        // Low was the old default and was never chosen: it reads as Medium until the flag is set.
+        assertEquals(TiltWake.MEDIUM, TiltWakeModel.resolve("1", null, null))
+        assertEquals(TiltWake.LOW, TiltWakeModel.resolve("1", null, "1"))
+        assertEquals(
+            mapOf(TiltWakeModel.SECURE_KEY to "3", TiltWakeModel.MIGRATED_KEY to "1"),
+            TiltWakeModel.migrationWrites("1", null),
+        )
+        assertEquals(emptyMap<String, String>(), TiltWakeModel.migrationWrites("1", "1"))
+        // Anything else only records that the migration ran, so a later explicit Low is honoured.
+        assertEquals(
+            mapOf(TiltWakeModel.MIGRATED_KEY to "1"),
+            TiltWakeModel.migrationWrites("2", null),
+        )
+        assertEquals(
+            mapOf(TiltWakeModel.MIGRATED_KEY to "1"),
+            TiltWakeModel.migrationWrites(null, null),
+        )
+    }
+
     @Test fun tiltWakeLegacyValue() {
         assertEquals("0", TiltWakeModel.legacyValue(TiltWake.OFF))
         assertEquals("1", TiltWakeModel.legacyValue(TiltWake.LOW))
-        assertEquals("1", TiltWakeModel.legacyValue(TiltWake.NORMAL))
+        assertEquals("1", TiltWakeModel.legacyValue(TiltWake.MEDIUM))
+        assertEquals("1", TiltWakeModel.legacyValue(TiltWake.HIGH))
     }
 
     @Test fun parseAndEncode() {
