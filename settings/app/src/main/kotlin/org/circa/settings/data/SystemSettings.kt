@@ -26,6 +26,7 @@ import org.circa.settings.model.AodBrightnessModel
 import org.circa.settings.model.TiltWake
 import org.circa.settings.model.TiltWakeModel
 import org.circa.settings.model.Ringer
+import org.circa.settings.model.ScreenTimeout
 import org.circa.settings.model.SettingKey
 import org.circa.settings.model.SettingsTable
 import org.circa.settings.model.SharedKeys
@@ -90,10 +91,11 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
 
     fun read(): SettingsSnapshot {
         migrateTiltWake()
+        migrateScreenTimeout()
         return SettingsSnapshot(
             qs = quick.read(),
             airplane = Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
-            screenTimeoutMs = Settings.System.getInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000),
+            screenTimeoutMs = Settings.System.getInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, ScreenTimeout.DEFAULT_MS),
             alwaysOn = GestureModel.parse(getRaw(SettingKey(SettingsTable.SECURE, ALWAYS_ON_KEY))),
             aodBrightness = AodBrightnessModel.resolve(
                 getRaw(SettingKey(SettingsTable.SECURE, AodBrightnessModel.SECURE_KEY)),
@@ -135,6 +137,21 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.MIGRATED_KEY)),
         )
         for ((name, value) in writes) putRaw(SettingKey(SettingsTable.SECURE, name), value)
+    }
+
+    /**
+     * The one-time screen-timeout migration: Android's 30 s default and the 10 s set by hand while
+     * the framework minimum was 10 s both become the new 5 s default, recorded in
+     * `circa_timeout_migrated`. Any other value is a real choice and is left alone.
+     */
+    private fun migrateScreenTimeout() {
+        val flag = SettingKey(SettingsTable.SECURE, ScreenTimeout.MIGRATED_KEY)
+        val migrated = getRaw(flag)
+        val current = Settings.System.getInt(resolver, ScreenTimeout.SYSTEM_KEY, ScreenTimeout.DEFAULT_MS)
+        ScreenTimeout.migrationValue(current, migrated)?.let {
+            Settings.System.putInt(resolver, ScreenTimeout.SYSTEM_KEY, it)
+        }
+        if (migrated == null) putRaw(flag, "1")
     }
 
     private fun secure(name: String) = getRaw(SettingKey(SettingsTable.SECURE, name))

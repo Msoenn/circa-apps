@@ -7,12 +7,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsModelTest {
-    @Test fun timeoutPresetsAreStockValues() {
-        assertEquals(listOf(15_000, 30_000, 60_000, 120_000, 300_000), ScreenTimeout.OPTIONS)
+    @Test fun timeoutPresetsAreCircaValues() {
+        assertEquals(listOf(5_000, 10_000, 15_000, 30_000, 60_000), ScreenTimeout.OPTIONS)
         assertEquals(
-            listOf("15 seconds", "30 seconds", "1 minute", "2 minutes", "5 minutes"),
+            listOf("5 seconds", "10 seconds", "15 seconds", "30 seconds", "1 minute"),
             ScreenTimeout.OPTIONS.map { ScreenTimeout.label(it) },
         )
+        assertEquals(5_000, ScreenTimeout.DEFAULT_MS)
+    }
+
+    @Test fun timeoutMigratesOldDefaultsOnce() {
+        // Android's old 30 s default (nobody chose it) and the 10 s set by hand both become 5 s.
+        assertEquals(5_000, ScreenTimeout.migrationValue(30_000, null))
+        assertEquals(5_000, ScreenTimeout.migrationValue(10_000, null))
+        // A real choice, including the new 5 s, is left alone.
+        assertNull(ScreenTimeout.migrationValue(15_000, null))
+        assertNull(ScreenTimeout.migrationValue(5_000, null))
+        assertNull(ScreenTimeout.migrationValue(Int.MAX_VALUE, null))
+        // Once the flag is set it never touches the value again.
+        assertNull(ScreenTimeout.migrationValue(30_000, "1"))
+        assertNull(ScreenTimeout.migrationValue(10_000, "1"))
     }
 
     @Test fun timeoutNeverAndCustom() {

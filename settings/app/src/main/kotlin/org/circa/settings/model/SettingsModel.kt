@@ -81,9 +81,26 @@ enum class SettingsTable { GLOBAL, SECURE, SYSTEM }
 
 data class SettingKey(val table: SettingsTable, val name: String)
 
-/** The `screen_off_timeout` picker (stock Wear's values). */
+/**
+ * The `screen_off_timeout` picker: Circa's short timeouts, plus the one-time migration off Android's
+ * 30 s default. `SystemSettings` applies it; nothing here touches Android.
+ */
 object ScreenTimeout {
-    val OPTIONS: List<Int> = listOf(15_000, 30_000, 60_000, 120_000, 300_000)
+    /** What the picker offers, shortest first. */
+    val OPTIONS: List<Int> = listOf(5_000, 10_000, 15_000, 30_000, 60_000)
+
+    /** Settings.System `screen_off_timeout`, ms; the framework clamps it to config_minimumScreenOffTimeout. */
+    const val SYSTEM_KEY = "screen_off_timeout"
+
+    /** Settings.Secure flag: the one-time migration has run (any stored value = done). */
+    const val MIGRATED_KEY = "circa_timeout_migrated"
+
+    /** Fresh /data and the migration both land here: the shortest timeout Circa Settings offers. */
+    const val DEFAULT_MS = 5_000
+
+    /** Android's old default (nobody chose it), and a value set by hand while the minimum was 10 s. */
+    private const val OLD_DEFAULT_MS = 30_000
+    private const val HAND_SET_MS = 10_000
 
     /** A timeout at or above this is "never sleeps" (the emulator image ships Int.MAX_VALUE). */
     private const val NEVER_FROM_MS = 1_800_000
@@ -95,6 +112,16 @@ object ScreenTimeout {
         ms <= 0 -> "Never"
         ms % 60_000 == 0 -> (ms / 60_000).let { if (it == 1) "1 minute" else "$it minutes" }
         else -> "${ms / 1000} seconds"
+    }
+
+    /**
+     * What the one-step migration should set `screen_off_timeout` to, or null to leave [currentMs]
+     * alone. Only the old Android default [OLD_DEFAULT_MS] and the by-hand [HAND_SET_MS] become
+     * [DEFAULT_MS]; anything else is a real choice. Once [migratedRaw] is set it never runs again.
+     */
+    fun migrationValue(currentMs: Int?, migratedRaw: String?): Int? {
+        if (migratedRaw != null) return null
+        return if (currentMs == OLD_DEFAULT_MS || currentMs == HAND_SET_MS) DEFAULT_MS else null
     }
 }
 
