@@ -75,6 +75,17 @@ class SettingsModelTest {
         )
     }
 
+    @Test fun aodBrightnessDefaultsToNormal() {
+        assertEquals(listOf("Low", "Normal", "High"), AodBrightness.entries.map { it.label })
+        assertEquals(listOf(0, 1, 2), AodBrightness.entries.map { it.value })
+        assertEquals(AodBrightness.NORMAL, AodBrightnessModel.resolve(null))
+        assertEquals(AodBrightness.NORMAL, AodBrightnessModel.resolve("7"))
+        assertEquals(AodBrightness.NORMAL, AodBrightnessModel.resolve("x"))
+        assertEquals(AodBrightness.LOW, AodBrightnessModel.resolve(" 0 "))
+        assertEquals(AodBrightness.HIGH, AodBrightnessModel.resolve("2"))
+        assertEquals(SettingsPage.DISPLAY, SettingsPage.AOD_BRIGHTNESS.parent)
+    }
+
     @Test fun tiltWakeValuesKeepLegacyNormal() {
         // High keeps the old "Normal" value 2 so a stored choice survives the rename; Medium 3 is new.
         assertEquals(listOf(0, 1, 3, 2), TiltWake.entries.map { it.value })

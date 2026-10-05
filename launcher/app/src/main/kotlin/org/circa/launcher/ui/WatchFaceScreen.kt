@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -52,8 +54,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import java.time.LocalDateTime
@@ -65,6 +69,8 @@ import kotlinx.coroutines.delay
 import org.circa.launcher.LauncherController
 import org.circa.launcher.model.ComplicationFormat
 import org.circa.launcher.model.EventView
+import org.circa.launcher.model.ExerciseGlyph
+import org.circa.launcher.model.ExerciseIndicator
 import org.circa.launcher.model.FaceStyle
 import org.circa.launcher.model.Gauge
 import org.circa.launcher.model.PhoneComplications
@@ -80,6 +86,9 @@ const val FACE_CONCENTRIC_TAG = "face_concentric"
 const val FACE_ANALOG_TAG = "face_analog"
 const val WEATHER_COMPLICATION_TAG = "cplx_weather"
 const val EVENT_COMPLICATION_TAG = "cplx_event"
+
+/** The face's running-workout indicator; exposed to uiautomator as `resource-id`. */
+const val EXERCISE_INDICATOR_TAG = "exercise_indicator"
 
 fun faceTag(style: FaceStyle): String = when (style) {
     FaceStyle.DIGITAL -> FACE_DIGITAL_TAG
@@ -97,9 +106,13 @@ data class FaceData(
     /** Phone-fed complications (null = no data, so the slot is not drawn at all). */
     val weather: WeatherView? = null,
     val event: EventView? = null,
+    /** The running workout's activity id (the exercise app's state provider); null = no indicator. */
+    val activity: String? = null,
     /** Taps open Circa Companion; null in the face picker's previews. */
     val onWeatherTap: (() -> Unit)? = null,
     val onEventTap: (() -> Unit)? = null,
+    /** Tapping the running indicator opens the exercise app's live screen. */
+    val onExerciseTap: (() -> Unit)? = null,
     /** A long press on a complication still opens the face picker, as anywhere else on the face. */
     val onLongPress: (() -> Unit)? = null,
 )
@@ -119,8 +132,10 @@ fun rememberFaceData(controller: LauncherController): FaceData {
         heartRate = controller.health.value.hrBpm,
         weather = PhoneComplications.weather(controller.phoneWeather.value, nowMs, fahrenheit),
         event = PhoneComplications.nextEvent(controller.phoneEvents.value, nowMs, ZoneId.systemDefault(), is24Hour),
+        activity = controller.exerciseActivity.value,
         onWeatherTap = { controller.openCompanion("WeatherActivity") },
         onEventTap = { controller.openCompanion("AgendaActivity") },
+        onExerciseTap = { controller.openExercise() },
         onLongPress = { controller.openFacePicker() },
     )
 }
@@ -160,7 +175,55 @@ fun WatchFace(style: FaceStyle, data: FaceData, modifier: Modifier = Modifier) {
             FaceStyle.CONCENTRIC -> ConcentricFace(data)
             FaceStyle.ANALOG -> AnalogFace(data)
         }
+        // Drawn last, so nothing on the face covers it, at the spot each face has free.
+        RunningIndicator(data.activity, data.onExerciseTap, data.onLongPress, indicatorTop(style))
     }
+}
+
+/**
+ * Top of the 24 dp indicator icon on each face: above the digital time, between the concentric hour and its inner
+ * minute ring, and above the analog complications inside the markers.
+ */
+private fun indicatorTop(style: FaceStyle): Dp = when (style) {
+    FaceStyle.DIGITAL -> 2.dp
+    FaceStyle.CONCENTRIC -> 49.dp
+    FaceStyle.ANALOG -> 26.dp
+}
+
+/**
+ * The running-workout indicator: the activity's 24 dp Material Symbols glyph in the accent, shown while the exercise
+ * app reports a workout (recording or paused). Tapping it opens the exercise app's live screen. A 40 dp touch target
+ * (the icon plus padding), like the complication rows.
+ */
+@Composable
+private fun BoxScope.RunningIndicator(activity: String?, onTap: (() -> Unit)?, onLongPress: (() -> Unit)?, top: Dp) {
+    val glyph = ExerciseIndicator.glyph(activity) ?: return
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .offset(y = top - 8.dp)
+            .size(40.dp)
+            .testTag(EXERCISE_INDICATOR_TAG)
+            .complicationTap("Open exercise", onTap, onLongPress),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = glyph.icon(),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+/** The Material Symbols glyph the indicator draws for [this] activity group (exercise/README.md, activity list). */
+private fun ExerciseGlyph.icon(): ImageVector = when (this) {
+    ExerciseGlyph.RUN -> CircaSymbols.Filled.DirectionsRun
+    ExerciseGlyph.WALK -> CircaSymbols.Filled.DirectionsWalk
+    ExerciseGlyph.BIKE -> CircaSymbols.Filled.DirectionsBike
+    ExerciseGlyph.HIKE -> CircaSymbols.Filled.Hiking
+    ExerciseGlyph.STRENGTH -> CircaSymbols.Filled.FitnessCenter
+    ExerciseGlyph.OTHER -> CircaSymbols.Filled.Exercise
 }
 
 // ---- B: big digital + three rings ------------------------------------------------------------

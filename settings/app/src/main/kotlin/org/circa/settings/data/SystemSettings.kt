@@ -21,6 +21,8 @@ import org.circa.settings.model.ProfileModel
 import org.circa.settings.model.Sex
 import org.circa.settings.model.GestureModel
 import org.circa.settings.model.GestureRow
+import org.circa.settings.model.AodBrightness
+import org.circa.settings.model.AodBrightnessModel
 import org.circa.settings.model.TiltWake
 import org.circa.settings.model.TiltWakeModel
 import org.circa.settings.model.Ringer
@@ -45,6 +47,8 @@ data class SettingsSnapshot(
     val airplane: Boolean,
     val screenTimeoutMs: Int,
     val alwaysOn: Boolean,
+    /** Settings.Secure circa_aod_brightness: the always-on face's doze brightness. */
+    val aodBrightness: AodBrightness = AodBrightness.NORMAL,
     val gestures: List<GestureRow>,
     val tiltWake: TiltWake,
     val ringer: Ringer,
@@ -91,6 +95,9 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             airplane = Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
             screenTimeoutMs = Settings.System.getInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000),
             alwaysOn = GestureModel.parse(getRaw(SettingKey(SettingsTable.SECURE, ALWAYS_ON_KEY))),
+            aodBrightness = AodBrightnessModel.resolve(
+                getRaw(SettingKey(SettingsTable.SECURE, AodBrightnessModel.SECURE_KEY)),
+            ),
             gestures = GestureModel.rows(::exists, ::getRaw),
             tiltWake = TiltWakeModel.resolve(
                 getRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.SECURE_KEY)),
@@ -234,6 +241,9 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
     // ---- Gestures -------------------------------------------------------------------------------
 
     fun setGesture(row: GestureRow, on: Boolean): Boolean = putRaw(row.key, GestureModel.encode(on))
+
+    fun setAodBrightness(level: AodBrightness): Boolean =
+        putRaw(SettingKey(SettingsTable.SECURE, AodBrightnessModel.SECURE_KEY), level.value.toString())
 
     fun setTiltWake(level: TiltWake): Boolean {
         val a = putRaw(SettingKey(SettingsTable.SECURE, TiltWakeModel.SECURE_KEY), level.value.toString())

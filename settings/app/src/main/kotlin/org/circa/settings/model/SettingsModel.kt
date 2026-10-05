@@ -14,6 +14,7 @@ enum class SettingsPage(val id: String, val title: String, val parent: SettingsP
     BRIGHTNESS("brightness", "Brightness", DISPLAY),
     TIMEOUT("timeout", "Screen timeout", DISPLAY),
     ACCENT("accent", "Accent colour", DISPLAY),
+    AOD_BRIGHTNESS("aod_brightness", "Always-on brightness", DISPLAY),
     GESTURES("gestures", "Gestures", MAIN),
     TILT_WAKE("tilt_wake", "Tilt-to-wake", GESTURES),
     SOUND("sound", "Sound & vibration", MAIN),
@@ -147,6 +148,26 @@ enum class TiltWake(val value: Int, val label: String, val hint: String) {
     LOW(1, "Low", "Face up and still"),
     MEDIUM(3, "Medium", "Raise to look"),
     HIGH(2, "High", "Easier to wake"),
+}
+
+/**
+ * How bright the always-on face is: the launcher's doze dream sets this as its doze screen brightness
+ * (`circa_aod_brightness`, read when the dream starts). [value] is what is stored.
+ */
+enum class AodBrightness(val value: Int, val label: String, val hint: String) {
+    LOW(0, "Low", "Darkest, for night"),
+    NORMAL(1, "Normal", "Readable indoors"),
+    HIGH(2, "High", "Easier to read outdoors"),
+}
+
+object AodBrightnessModel {
+    /** Settings.Secure key, shared with the launcher's `AodBrightness` (same numbers). */
+    const val SECURE_KEY = "circa_aod_brightness"
+
+    /** The stored level; unset or unknown means [AodBrightness.NORMAL]. */
+    fun resolve(raw: String?): AodBrightness =
+        raw?.trim()?.toIntOrNull()?.let { v -> AodBrightness.entries.firstOrNull { it.value == v } }
+            ?: AodBrightness.NORMAL
 }
 
 object TiltWakeModel {

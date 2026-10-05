@@ -11,6 +11,7 @@ import org.circa.settings.model.GestureRow
 import org.circa.settings.model.LongPressAction
 import org.circa.settings.model.ProfileField
 import org.circa.settings.model.Sex
+import org.circa.settings.model.AodBrightness
 import org.circa.settings.model.TiltWake
 import org.circa.settings.model.Ringer
 import org.circa.settings.model.SettingsNav
@@ -89,6 +90,7 @@ class SettingsController(context: Context, private val finish: () -> Unit) {
     fun setBrightness(level: Int) = change { setBrightness(level) }
     fun setScreenTimeout(ms: Int) = change { setScreenTimeout(ms) }
     fun setAlwaysOn(on: Boolean) = change { setAlwaysOn(on) }
+    fun setAodBrightness(level: AodBrightness) = change { setAodBrightness(level) }
     fun setAccent(accent: Accent) = change { setAccent(accent) }
     fun setGesture(row: GestureRow, on: Boolean) = change { setGesture(row, on) }
     fun setTiltWake(level: TiltWake) = change { setTiltWake(level) }

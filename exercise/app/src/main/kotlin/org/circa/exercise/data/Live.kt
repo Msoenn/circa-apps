@@ -8,6 +8,7 @@ import org.circa.exercise.model.ActivityType
 import org.circa.exercise.model.Phase
 import org.circa.exercise.model.Profile
 import org.circa.exercise.model.Summary
+import org.circa.exercise.model.WorkoutState
 import org.circa.exercise.model.Zones
 
 /** GPS indicator: blinking while searching, solid green for 3 s after the first fix, then hidden. */
@@ -68,6 +69,16 @@ object Live {
     fun activeType(ctx: Context): ActivityType? {
         view.value?.let { return if (it.phase != Phase.FINISHED) it.type else null }
         return Storage(ctx).loadActive()?.takeIf { it.isActive }?.type
+    }
+
+    /**
+     * The running workout for the launcher's state provider ([StateProvider]): the workout in memory, else the
+     * snapshot on disk (a service that has not been restored yet), else idle. Never throws.
+     */
+    fun state(ctx: Context): WorkoutState {
+        view.value?.takeIf { it.phase != Phase.FINISHED }?.let { return WorkoutState.of(it.type.id, it.phase, it.startMs) }
+        val w = Storage(ctx).loadActive()?.takeIf { it.isActive }
+        return if (w != null) WorkoutState.of(w.type.id, w.phase, w.startMs) else WorkoutState.IDLE_STATE
     }
 
     fun profile(ctx: Context): Profile {

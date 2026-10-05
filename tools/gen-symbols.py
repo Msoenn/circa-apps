@@ -24,6 +24,8 @@ Output
     (the QS-tile pipeline needs an android.graphics.drawable.Drawable, not a Compose ImageVector).
 (c) keyboard/.../res/drawable/circa_ic_<name>{,_outlined}.xml  for names marked `keyboard`
     (the keyboard is a bare android.view.View with no AndroidX, so it draws platform VectorDrawables).
+(d) watchlink/.../res/drawable/circa_ic_<name>.xml   for names marked `watchlink`   (filled)
+    (WatchLink posts platform notifications, whose small icon must be a resource id, not a Compose ImageVector).
 
 Usage:  tools/gen-symbols.py [--systemui-dir DIR]
 """
@@ -41,6 +43,7 @@ NAMES_FILE = ROOT / "tools/symbols/names.txt"
 CACHE_DIR = ROOT / ".cache/symbols"
 SHARED_OUT = ROOT / "shared/symbols/src/main/kotlin/org/circa/symbols/CircaSymbols.kt"
 KEYBOARD_DRAWABLE_DIR = ROOT / "keyboard/app/src/main/res/drawable"
+WATCHLINK_DRAWABLE_DIR = ROOT / "watchlink/app/src/main/res/drawable"
 
 RAW = (
     "https://raw.githubusercontent.com/google/material-design-icons/master/"
@@ -63,7 +66,7 @@ def parse_names(path: Path) -> list[tuple[str, set[str]]]:
             continue
         parts = line.split()
         name, targets = parts[0], set(parts[1:])
-        bad = targets - {"sysui", "keyboard"}
+        bad = targets - {"sysui", "keyboard", "watchlink"}
         if bad:
             sys.exit(f"{path}:{lineno}: unknown target(s): {' '.join(sorted(bad))}")
         if not re.fullmatch(r"[a-z0-9_]+", name):
@@ -246,6 +249,13 @@ def main() -> None:
         paths,
         KEYBOARD_DRAWABLE_DIR,
         outlined_too=True,
+        tinted=False,
+    )
+    write_drawables(
+        [n for n, t in entries if "watchlink" in t],
+        paths,
+        WATCHLINK_DRAWABLE_DIR,
+        outlined_too=False,
         tinted=False,
     )
 

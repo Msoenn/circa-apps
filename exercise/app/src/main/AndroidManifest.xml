@@ -73,6 +73,13 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
+        <!-- The launcher's running-workout indicator; caller-checked in code (system org.circa.* callers only). -->
+        <provider
+            android:name=".data.StateProvider"
+            android:authorities="org.circa.exercise.state"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
         <!-- Emulator aid (fake heart rate). DUMP: only shell / system can send it; ignored on user builds. -->
         <receiver
             android:name=".data.DebugReceiver"

@@ -506,6 +506,7 @@ public final class HostTest {
         PhoneDataTest.run();
         TrackSyncTest.run();
         BleNameTest.run();
+        NotifIconTest.run();
 
         // 7. Fuzz: random values as GB encoded them, random chunking
         int fuzz = 0;

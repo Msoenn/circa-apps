@@ -73,6 +73,7 @@ import org.circa.settings.model.Accent
 import org.circa.settings.model.BatteryLabel
 import org.circa.settings.model.BrightnessLevel
 import org.circa.settings.model.LockTimeout
+import org.circa.settings.model.AodBrightness
 import org.circa.settings.model.TiltWake
 import org.circa.settings.model.LockWhenTakenOffRow
 import org.circa.settings.model.Ringer
@@ -115,6 +116,7 @@ fun SettingsScreen(controller: SettingsController) {
         SettingsPage.BRIGHTNESS -> BrightnessPage(controller)
         SettingsPage.TIMEOUT -> TimeoutPage(controller)
         SettingsPage.ACCENT -> AccentPage(controller)
+        SettingsPage.AOD_BRIGHTNESS -> AodBrightnessPage(controller)
         SettingsPage.GESTURES -> GesturesPage(controller)
         SettingsPage.TILT_WAKE -> TiltWakePage(controller)
         SettingsPage.SOUND -> SoundPage(controller)
@@ -384,6 +386,10 @@ private fun DisplayPage(c: SettingsController) = ListPage(c, SettingsPage.DISPLA
     toggleRow("aod", spec, "Always-on display", s.alwaysOn, CircaSymbols.Outlined.Visibility, secondary = onOff(s.alwaysOn)) {
         c.setAlwaysOn(it)
     }
+    navRow(
+        "aod_brightness", spec, "Always-on brightness", CircaSymbols.Outlined.Sunny,
+        secondary = s.aodBrightness.label,
+    ) { c.openSettingsPage(SettingsPage.AOD_BRIGHTNESS) }
     // The face is the launcher's own preference: this row opens the launcher's picker.
     navRow("watchface", spec, "Watch face", CircaSymbols.Outlined.Wallpaper) {
         c.systemSettings.openFacePicker()
@@ -398,6 +404,16 @@ private fun TimeoutPage(c: SettingsController) = ListPage(c, SettingsPage.TIMEOU
     val current = c.settingsState.value.screenTimeoutMs
     ScreenTimeout.OPTIONS.forEach { ms ->
         radioRow("timeout_$ms", spec, ScreenTimeout.label(ms), current == ms) { c.setScreenTimeout(ms) }
+    }
+}
+
+@Composable
+private fun AodBrightnessPage(c: SettingsController) = ListPage(c, SettingsPage.AOD_BRIGHTNESS) { spec ->
+    val current = c.settingsState.value.aodBrightness
+    AodBrightness.entries.forEach { level ->
+        radioRow("aod_brightness_${level.value}", spec, level.label, current == level, secondary = level.hint) {
+            c.setAodBrightness(level)
+        }
     }
 }
 

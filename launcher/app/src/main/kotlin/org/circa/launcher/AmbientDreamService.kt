@@ -11,11 +11,13 @@ import android.graphics.drawable.ColorDrawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.service.dreams.DreamService
 import android.text.format.DateFormat
 import android.util.Log
 import android.view.Display
 import org.circa.launcher.model.AmbientDozeStateMachine
+import org.circa.launcher.model.AodBrightness
 import org.circa.launcher.model.AmbientDozeStateMachine.Screen
 
 /**
@@ -39,8 +41,8 @@ import org.circa.launcher.model.AmbientDozeStateMachine.Screen
  * broadcast remains the tick source for a non-doze run of the same service (a screensaver preview,
  * where the display stays on and it does arrive).
  *
- * Everything it needs from the platform is `startDozing()`/`stopDozing()`/`setDozeScreenState(int)`
- * (and `canDoze()`), which are `@hide` ("for use by system UI components only") and therefore
+ * Everything it needs from the platform is `startDozing()`/`stopDozing()`/`setDozeScreenState(int)`/
+ * `setDozeScreenBrightness(float)` (and `canDoze()`), which are `@hide` ("for use by system UI components only") and therefore
  * reached by reflection; see [callHidden].
  */
 class AmbientDreamService : DreamService() {
@@ -107,6 +109,12 @@ class AmbientDreamService : DreamService() {
         super.onDreamingStarted()
         firstFrameDrawn = false
         doze.onStopped()
+        // The panel brightness while dozing: Circa Settings' Always-on brightness (default Normal).
+        // Without it the framework's doze default applies (config_screenBrightnessDoze, 0 here).
+        val brightness = AodBrightness.resolve(
+            Settings.Secure.getString(contentResolver, AodBrightness.SECURE_KEY),
+        )
+        callHidden("setDozeScreenBrightness", brightness.dozeBrightness)
         // Ask the power manager to keep the panel in the low-power doze state and to let the AP
         // suspend; a doze dream is the only thing that can do this (DreamManagerService acquires its
         // "dream:doze" wake lock for us). canDoze() is what separates this from a preview/screensaver
@@ -211,7 +219,13 @@ class AmbientDreamService : DreamService() {
      */
     private fun callHidden(name: String, vararg args: Any): Boolean =
         try {
-            val types = args.map { if (it is Int) Integer.TYPE else it.javaClass }.toTypedArray()
+            val types = args.map {
+                when (it) {
+                    is Int -> Integer.TYPE
+                    is Float -> java.lang.Float.TYPE
+                    else -> it.javaClass
+                }
+            }.toTypedArray()
             DreamService::class.java.getMethod(name, *types).invoke(this, *args)
             Log.i(TAG, "$name(${args.joinToString()}) ok")
             true

@@ -78,7 +78,12 @@ fun FacePickerScreen(controller: LauncherController) {
         pageCount = { styles.size },
     )
     // Previews show the phone complications but are not interactive: a tap there chooses the face.
-    val data = rememberFaceData(controller).copy(onWeatherTap = null, onEventTap = null, onLongPress = null)
+    val data = rememberFaceData(controller).copy(
+        onWeatherTap = null,
+        onEventTap = null,
+        onExerciseTap = null,
+        onLongPress = null,
+    )
     val focusRequester = remember { FocusRequester() }
     val rotary = remember(pagerState) { PagerRotaryBehavior(pagerState) }
     val current = styles[pagerState.currentPage]

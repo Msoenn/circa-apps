@@ -7,9 +7,13 @@ Jetpack Compose for Wear OS (Material 3), no Google services, no INTERNET permis
 ## Screens
 
 - **Watch faces** (digital, concentric, analog) with complications for heart rate, steps, weather and the next
-  event. A long press on the face opens the face picker (`org.circa.intent.action.PICK_FACE`); the choice and the
-  accent colour are the launcher's own preferences (the accent and "lock when taken off" are shared with Circa
-  Settings through `Settings.Secure` keys `circa_accent_color` and `circa_lock_when_taken_off`).
+  event. While a workout records (or is paused), a small 24 dp indicator with the activity's Material Symbols glyph
+  sits in the face's free space (above the digital time, between the concentric hour and its inner ring, above the
+  analog complications); tapping it opens the exercise app's live screen. The exercise app's state provider
+  (`content://org.circa.exercise.state/current`, a `ContentObserver` - no polling) drives it. A long press on the face
+  opens the face picker (`org.circa.intent.action.PICK_FACE`); the choice and the accent colour are the launcher's own
+  preferences (the accent and "lock when taken off" are shared with Circa Settings through `Settings.Secure` keys
+  `circa_accent_color` and `circa_lock_when_taken_off`).
 - **Carousel of tiles** next to the face: health (heart rate and steps from WatchLink), media and agenda.
 - **App list** (`android.intent.action.ALL_APPS`) and the recent apps.
 
@@ -32,7 +36,12 @@ SystemUI draws its own copy of the face.
 
 The ambient face is the launcher's `AmbientDreamService` (a `DreamService` with `BIND_DREAM_SERVICE`), set as the
 framework's `config_dozeComponent` by the overlay. It redraws once a minute from an exact alarm and lets the CPU
-suspend in between. Only the platform signature lets the app be the doze component.
+suspend in between. Only the platform signature lets the app be the doze component. The time is near-white (#E8EAED,
+regular weight) on black, and the dream sets its doze brightness from Circa Settings › Display › Always-on brightness
+(`Settings.Secure circa_aod_brightness`: Low 0.0 / Normal 0.02, the default / High 0.043; the watch's own doze curve
+runs 0.0 to 0.0428). `MainActivity` is `showWhenLocked` but not `turnScreenOn`: WindowManager lets a turn-screen-on
+activity launched while the screen was on wake it again at its next keyguard update, which bounced a sleep right
+after a HOME start.
 
 ## Tilt-to-wake and lock when taken off
 

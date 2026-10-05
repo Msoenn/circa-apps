@@ -1,7 +1,7 @@
 # Circa Settings (`org.circa.settings`)
 
 The round Settings app, in stock Wear OS's order: connectivity (Wi-Fi, Bluetooth with a round pairing prompt),
-display (brightness, always-on, the launcher's face and accent), sound and vibration, Do Not Disturb, apps (info,
+display (brightness, always-on and its brightness, the launcher's face and accent), sound and vibration, Do Not Disturb, apps (info,
 force stop, disable, uninstall, permissions), security (PIN set/change/remove with the keyguard's keypad, lock when
 taken off), exercise profile and buttons, system (time zone, date and time, about, restart). Kotlin + Compose for
 Wear OS, no INTERNET permission.

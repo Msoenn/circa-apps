@@ -122,9 +122,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         hideSystemBars()
         // The face shows over the keyguard (launcher/README.md): a wake with a PIN set lands on our
-        // face instead of SystemUI's phone lockscreen, and the screen may be turned on for us.
+        // face instead of SystemUI's phone lockscreen. No setTurnScreenOn: the crown and side button
+        // wake the screen, and WindowManager lets a turn-screen-on activity launched while the screen
+        // was on wake it again at its next keyguard update - a sleep right after a HOME start bounced
+        // straight back to the face instead of dozing.
         setShowWhenLocked(true)
-        setTurnScreenOn(true)
         lockImmediately()
         controller = LauncherController(this)
         controller.unlockRequester = ::requestUnlock
@@ -252,11 +254,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         stepSource.start()
         controller.startHealth()
+        controller.startExerciseState()
     }
 
     override fun onStop() {
         stepSource.stop()
         controller.stopHealth()
+        controller.stopExerciseState()
         super.onStop()
     }
 

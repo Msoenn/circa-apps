@@ -12,8 +12,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.hardware.SensorManager
 import android.os.BatteryManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -148,7 +153,7 @@ class WatchLinkService : Service(), BleServer.Listener {
      */
     private fun goForeground() {
         fgsNotif = Notification.Builder(this, CH_SERVICE)
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(R.drawable.circa_ic_watch)
             .setContentTitle("WatchLink")
             .setContentText("Gadgetbridge link (Bangle.js mode)")
             .setOngoing(true)
@@ -659,6 +664,27 @@ class WatchLinkService : Service(), BleServer.Listener {
         return PendingIntent.getService(this, req, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
+    /**
+     * 48 dp large icon: a circle in the app's deterministic [NotifIcon.color] with its first letter in white, so
+     * the shade and heads-up card identify the app at a glance. Null `src` still gets the fallback color and '?'.
+     */
+    private fun avatar(src: String?): Bitmap {
+        val size = Math.round(48 * resources.displayMetrics.density)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val circle = Paint(Paint.ANTI_ALIAS_FLAG)
+        circle.color = NotifIcon.color(src)
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, circle)
+        val text = Paint(Paint.ANTI_ALIAS_FLAG)
+        text.color = 0xFFFFFFFF.toInt()
+        text.textSize = size * 0.6f
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val fm = text.fontMetrics
+        canvas.drawText(NotifIcon.letter(src).toString(), size / 2f, size / 2f - (fm.ascent + fm.descent) / 2f, text)
+        return bmp
+    }
+
     private fun showNotification(m: Map<String, Any?>) {
         val id = Proto.num(m, "id", 0)
         val src = Proto.str(m, "src")
@@ -674,7 +700,8 @@ class WatchLinkService : Service(), BleServer.Listener {
         // Alert only when this post is new content outside the rate-limit window; the shade always gets the update.
         val alert = notifyPolicy.decide(id, head, text.toString(), SystemClock.elapsedRealtime())
         val b = Notification.Builder(this, CH_NOTIFY)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.circa_ic_notifications)
+            .setLargeIcon(avatar(src))
             .setContentTitle(head ?: "Notification")
             .setContentText(text.toString())
             .setStyle(Notification.BigTextStyle().bigText(text.toString()))
@@ -685,7 +712,11 @@ class WatchLinkService : Service(), BleServer.Listener {
             .setOnlyAlertOnce(!alert)
             .setContentIntent(svcPi(ACTION_NOTIF_OPEN, id))
             .setDeleteIntent(svcPi(ACTION_NOTIF_DISMISS, id))
-        if (src != null) b.setSubText(src)
+        // Show the phone app's own name (substName) instead of WatchLink's package label. "SMS Message" is the
+        // phone's SMS app under a name users don't recognise; see NotifIcon.appName.
+        NotifIcon.appName(src)?.let { app ->
+            b.addExtras(Bundle().apply { putString(EXTRA_SUBSTITUTE_APP_NAME, app) })
+        }
         if (!alert) b.setGroup(GROUP_KEY_SILENT).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
         nm.notify(TAG_GB, id.toInt(), b.build())
         Log.i(TAG, "NOTIFY posted id=$id alert=$alert")
@@ -699,7 +730,7 @@ class WatchLinkService : Service(), BleServer.Listener {
             val number = Proto.str(m, "number")
             val who = if (name != null && name.isNotEmpty()) name else number ?: "Unknown"
             val n = Notification.Builder(this, CH_CALL)
-                .setSmallIcon(android.R.drawable.sym_call_incoming)
+                .setSmallIcon(R.drawable.circa_ic_call)
                 .setContentTitle("Incoming call")
                 .setContentText(who + (if (name != null && number != null) " ($number)" else ""))
                 .setCategory(Notification.CATEGORY_CALL)
@@ -1102,6 +1133,13 @@ class WatchLinkService : Service(), BleServer.Listener {
 
         /** Wear's theater-mode setting (Settings.Global); not in the public SDK, so the key is spelled out. */
         const val SETTING_THEATER_MODE_ON = "theater_mode_on"
+
+        /**
+         * Notification.EXTRA_SUBSTITUTE_APP_NAME: the name the shade shows instead of the posting package's label.
+         * @SystemApi, gated by SUBSTITUTE_NOTIFICATION_APP_NAME, and absent from the public android.jar, so the
+         * key is spelled out (see AndroidManifest.xml for the declaration).
+         */
+        const val EXTRA_SUBSTITUTE_APP_NAME = "android.substName"
 
         /** Slack added to every elapsed-time alarm: the phone-synced clock can sit a few hundred ms off the grid. */
         const val ALARM_ARM_SLACK_MS = 200L

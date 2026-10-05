@@ -84,6 +84,7 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         main.removeCallbacks(ticker)
         main.post(ticker)
         publish()
+        StateProvider.notify(this)
         return START_STICKY
     }
 
@@ -134,6 +135,9 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         Live.pending.value = summary
         workout = null
         Live.view.value = null
+        // Notify after the flush/scrub/save that precede it on the single-thread executor: the provider then reads the
+        // FINISHED snapshot from disk as idle instead of the stale recording one.
+        io.submit { StateProvider.notify(this) }
         stopEverything()
     }
 
@@ -141,7 +145,10 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         workout = null
         rows.clear()
         Live.view.value = null
-        io.submit { storage.discard() }
+        io.submit {
+            runCatching { storage.discard() }.onFailure { Log.w(TAG, "discard failed", it) }
+            StateProvider.notify(this)
+        }
         stopEverything()
     }
 

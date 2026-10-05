@@ -11,5 +11,10 @@ estimate use the exercise profile from Circa Settings (shared through `Settings.
   recorder tracks. The sync provider `org.circa.exercise.sync` is exported without a permission but checks callers:
   system uids, this app, and preinstalled `org.circa.*` packages. Its `call()` methods: `list` (ids after a given id),
   `csv` (one track), `state` (whether a workout is recording, and its Gadgetbridge activity name).
+- **Notification:** the ongoing card is a chronometer while recording (it ticks the accumulated active time) and
+  shows the frozen time as text while paused ("Paused · 12:34").
+- **Launcher indicator:** `org.circa.exercise.state/current` (`activity`, `state` recording/paused/idle,
+  `started_ms`) lets the launcher's watch face show an icon for the running workout. Read-only, caller-checked, and
+  the service calls `notifyChange` on every start/pause/resume/end.
 
 Build: `../build-all.sh --only exercise`; the models (zones, pace, CSV, caller policy) are unit-tested.

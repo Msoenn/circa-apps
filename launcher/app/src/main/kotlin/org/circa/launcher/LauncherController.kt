@@ -10,6 +10,7 @@ import android.content.Intent
 import android.provider.Settings
 import org.circa.launcher.data.AppLoader
 import org.circa.launcher.data.CircaShared
+import org.circa.launcher.data.ExerciseStateRepository
 import org.circa.launcher.data.HealthRepository
 import org.circa.launcher.data.NotificationStore
 import org.circa.launcher.data.PhoneDataRepository
@@ -114,6 +115,15 @@ class LauncherController(private val context: Context) {
      * watchlink/DATA-CONTRACT.md); started/stopped with the launcher.
      */
     private val healthRepository = HealthRepository(context)
+
+    /**
+     * The exercise app's running workout, read from its state provider (see [ExerciseStateRepository]);
+     * started/stopped with the launcher. Drives the small activity indicator on the face.
+     */
+    private val exerciseState = ExerciseStateRepository(context)
+
+    /** The running workout's activity id (null = nothing recording), for the face's indicator. */
+    val exerciseActivity: State<String?> get() = exerciseState.activity
 
     /** WatchLink's phone data (weather, calendar, music, status) for the complications and tiles. */
     private val phoneData = PhoneDataRepository(context)
@@ -231,6 +241,29 @@ class LauncherController(private val context: Context) {
     fun stopHealth() {
         healthRepository.stop()
         phoneData.stop()
+    }
+
+    /** Start observing the exercise app's running workout; the activity calls this from `onStart`. */
+    fun startExerciseState() {
+        exerciseState.start()
+    }
+
+    /** Stop observing the exercise app; the activity calls this from `onStop`. */
+    fun stopExerciseState() {
+        exerciseState.stop()
+    }
+
+    /**
+     * The face's running indicator: open the exercise app, which resolves to its live screen while a workout is
+     * recording (or paused) and to its list otherwise. Best effort.
+     */
+    fun openExercise() {
+        runCatching {
+            context.startActivity(
+                Intent().setClassName("org.circa.exercise", "org.circa.exercise.MainActivity")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 
     /** A face complication tap: open one of Circa Companion's activities (Weather, Agenda). Best effort. */

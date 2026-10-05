@@ -298,3 +298,48 @@ class LastUsedTest {
         assertEquals(ActivityType.WALK, st.lastType())
     }
 }
+
+/** The ongoing notification's text and chronometer base (model/NotifText.kt). */
+class NotifTextTest {
+    @Test fun pausedTextShowsFrozenActiveTime() {
+        assertEquals("Paused · 12:34", NotifText.paused(754_000L))
+        assertEquals("Paused · 0:07", NotifText.paused(7_000L))
+        assertEquals("Paused · 1:02:03", NotifText.paused(3_723_000L))
+    }
+
+    @Test fun chronoBaseCountsOnlyActiveTime() {
+        // 10 min in with 2 min of earlier pause: the base is shifted back by the paused time, so the chronometer
+        // reads 8 min of active time.
+        assertEquals(1_000_000L, NotifText.chronoBase(1_600_000L, 600_000L))
+        assertEquals(500_000L, NotifText.chronoBase(1_600_000L, 1_100_000L))
+    }
+}
+
+/** The state provider's row mapping (model/WorkoutState.kt). */
+class WorkoutStateTest {
+    @Test fun phaseMapsToProviderState() {
+        assertEquals(WorkoutState.RECORDING, WorkoutState.of("run", Phase.RECORDING, 123L).state)
+        assertEquals(WorkoutState.PAUSED, WorkoutState.of("walk", Phase.PAUSED, 123L).state)
+        assertEquals(WorkoutState.IDLE, WorkoutState.of("run", Phase.FINISHED, 123L).state)
+        assertEquals("bike", WorkoutState.of("bike", Phase.PAUSED, 123L).activity)
+        assertEquals(123L, WorkoutState.of("bike", Phase.PAUSED, 123L).startedMs)
+        // Idle is always the empty row.
+        assertEquals(WorkoutState.IDLE_STATE, WorkoutState.of("run", Phase.FINISHED, 123L))
+        assertEquals("", WorkoutState.IDLE_STATE.activity)
+        assertEquals(0L, WorkoutState.IDLE_STATE.startedMs)
+    }
+}
+
+/** The state provider's caller check (model/StateCallerPolicy.kt), the rule WatchLink uses. */
+class StateCallerPolicyTest {
+    @Test fun onlySystemOrgCircaCallers() {
+        assertTrue(StateCallerPolicy.allowed(listOf("org.circa.launcher"), listOf(true), "org.circa.exercise"))
+        assertTrue(StateCallerPolicy.allowed(listOf("org.circa.exercise"), listOf(true), "org.circa.exercise"))
+        // Shell (no matching package) and ordinary apps are denied, even system ones.
+        assertFalse(StateCallerPolicy.allowed(emptyList(), emptyList(), "org.circa.exercise"))
+        assertFalse(StateCallerPolicy.allowed(listOf("com.android.shell"), listOf(true), "org.circa.exercise"))
+        assertFalse(StateCallerPolicy.allowed(listOf("com.example"), listOf(true), "org.circa.exercise"))
+        // A non-system app that merely reuses the prefix is denied.
+        assertFalse(StateCallerPolicy.allowed(listOf("org.circa.fake"), listOf(false), "org.circa.exercise"))
+    }
+}

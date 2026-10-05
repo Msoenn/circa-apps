@@ -59,6 +59,9 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <package android:name="org.circa.watchlink" />
+        <!-- The exercise app's state provider (content://org.circa.exercise.state) behind the face's
+             running indicator; without this the provider is invisible to us on API 30+. -->
+        <package android:name="org.circa.exercise" />
     </queries>
 
     <!-- v1.2b tray. All of these are granted on the device because the launcher is signed with the

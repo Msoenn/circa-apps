@@ -16,29 +16,33 @@ import org.circa.launcher.model.ComplicationFormat
  * application processor suspended between minutes, so the AOD face is one static frame plus one
  * redraw a minute.
  *
- * v1.4 is the "time only" option: the time, small and grey, vertically centred - no date, no
+ * v1.4 is the "time only" option: the time, small and near-white, vertically centred - no date, no
  * battery, no complications, no outlines, no AM/PM marker. Ambient rules it follows
  *:
- *  - black background, one small grey text, no animation, no seconds;
+ *  - black background, one small near-white text, no animation, no seconds;
  *  - the whole drawing is shifted a few px once a minute ([AmbientFace.burnInOffset]) to keep the
  *    same pixels from being lit for hours, and stays well inside the inscribed circle so the shift
  *    cannot clip anything.
  *
  * The size is a fraction of the panel, so the same code draws identically on the 384px emulator
- * panel and on the watch. A filled grey "7:42" at this size lights about 1.5 % of the panel, far
- * under stock's 15 % ceiling.
+ * panel and on the watch. A filled "7:42" at this size lights about 1.5 % of the panel, far under
+ * stock's 15 % ceiling.
+ *
+ * The colour is near-white (#E8EAED), as stock Wear's ambient digits: the panel runs at its doze
+ * brightness then (Settings › Display › Always-on brightness; Low is the framework's 0), and the
+ * earlier mid grey (#9AA0A6, light weight) was hard to read on the watch at that level.
  */
 class AmbientFaceView(context: Context) : View(context) {
 
     private var nowMillis: Long = System.currentTimeMillis()
     private var is24Hour: Boolean = false
 
-    /** Mid grey, as in the "time only" mockup (#9aa0a6): dim, but above the panel's legibility floor. */
+    /** Near-white, regular weight: thin light strokes vanish at doze brightness. */
     private val timePaint = Paint().apply {
-        color = Color.rgb(0x9A, 0xA0, 0xA6)
+        color = TIME_COLOR
         style = Paint.Style.FILL
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         isAntiAlias = true
     }
 
@@ -77,5 +81,8 @@ class AmbientFaceView(context: Context) : View(context) {
     private companion object {
         /** Time size, as a fraction of the panel's short side. */
         const val TIME_TEXT_SIZE = 0.19f
+
+        /** #E8EAED: stock Wear's near-white ambient digits. */
+        val TIME_COLOR = Color.rgb(0xE8, 0xEA, 0xED)
     }
 }
