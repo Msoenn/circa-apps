@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Companion</string>
+    <string name="label_media">Media</string>
+    <string name="label_weather">Weather</string>
+    <string name="label_agenda">Agenda</string>
+    <string name="label_find_phone">Find phone</string>
+    <string name="label_flashlight">Flashlight</string>
+</resources>

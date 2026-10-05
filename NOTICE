@@ -1,0 +1,21 @@
+Circa apps
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This repository includes or is derived from the following third-party material:
+
+- Material Symbols (Rounded) by Google, https://github.com/google/material-design-icons
+  Apache License 2.0. The icon paths in shared/symbols and keyboard/app/src/main/res/drawable/circa_ic_*.xml are
+  generated from it by tools/gen-symbols.py.
+
+- AOSP LatinIME English word list (dictionaries/en_US_wordlist.combined), The Android Open Source Project,
+  Apache License 2.0. keyboard/app/src/main/res/raw/words_en.txt is the top of that list.
+
+- Gradle wrapper (gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.jar in each app), Gradle Inc. and the
+  original authors, Apache License 2.0.
+
+- The AOSP test keys used by build-all.sh for signing are not included; they are read from an AOSP source tree or
+  fetched from android.googlesource.com (Apache License 2.0).
+
+Interoperability: WatchLink implements the Bangle.js protocol as Gadgetbridge (https://gadgetbridge.org, AGPL-3.0)
+speaks it. No Gadgetbridge code is included; the host tests compare against recorded byte sequences
+(watchlink/app/src/hostTest/resources/gb-golden.tsv) that Gadgetbridge's encoder produces for the test inputs.

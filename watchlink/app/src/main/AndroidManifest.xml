@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  targetSdk 36 (Android 16), chosen deliberately: the watch runs API 36.
+  On API 36 the heart-rate sensor is gated by android.permission.health.READ_HEART_RATE (BODY_SENSORS is the
+  pre-36 name; the platform maps it for older targets). Background HR = health.READ_HEALTH_DATA_IN_BACKGROUND.
+
+  The package name comes from `namespace`/`applicationId` in app/build.gradle.kts (AGP rejects the old
+  package="..." manifest attribute); it is still org.circa.watchlink. minSdk/targetSdk live there too.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Package visibility for the health provider's caller check (PackageManager.getPackagesForUid still sees the
+         UID, but declaring the launcher is the honest contract; see watchlink/DATA-CONTRACT.md). -->
+    <queries>
+        <package android:name="org.circa.launcher" />
+        <!-- The Exercise app's workout provider (listRecs / fetchRec and the live workout kind; ExerciseSource). -->
+        <provider android:authorities="org.circa.exercise.sync" />
+    </queries>
+
+    <application android:label="WatchLink" android:hasCode="true" android:allowBackup="false"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <activity android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:keepScreenOn="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Health permission rationale entry points (Health Connect refuses health grants without one). -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+        <activity-alias android:name=".HealthPermissionUsage"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+        <service android:name=".WatchLinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|health" />
+        <!-- Autostart (only if the user last pressed Start). BOOT_COMPLETED / MY_PACKAGE_REPLACED are protected
+             broadcasts, so exporting the receiver doesn't let other apps trigger it. -->
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- Read-only health values for the launcher. No android:permission: the apps use different signing keys,
+             so access is enforced in HealthProvider.query() by calling UID (see the class doc and
+             watchlink/DATA-CONTRACT.md). Exported so the launcher can read it. -->
+        <provider android:name=".HealthProvider"
+            android:authorities="org.circa.watchlink.health"
+            android:exported="true"
+            android:enabled="true"
+            android:grantUriPermissions="false" />
+        <!-- Phone data (weather, music, calendar, commands) for the Circa apps. Exported, no manifest permission (the apps are
+             platform-signed, WatchLink is not); PhoneDataProvider enforces the caller allowlist (CallerPolicy). See
+             watchlink/DATA-CONTRACT.md. -->
+        <provider android:name=".PhoneDataProvider"
+            android:authorities="org.circa.watchlink.data"
+            android:exported="true"
+            android:enabled="true"
+            android:grantUriPermissions="false" />
+        <!-- Test hook: feed a Gadgetbridge line into the same parser as BLE input. DUMP is held by the adb shell only. -->
+        <receiver android:name=".DebugGbLineReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="org.circa.watchlink.DEBUG_GB_LINE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

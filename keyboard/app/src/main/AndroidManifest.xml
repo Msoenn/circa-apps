@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Circa Keyboard (keyboard/README.md): a round, full-screen input method for the 384x384
+  watch. No permissions at all (no INTERNET, nothing privileged): an IME only needs BIND_INPUT_METHOD,
+  which protects the service and is held by the system.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="false">
+
+        <service
+            android:name=".CircaKeyboardService"
+            android:directBootAware="true"
+            android:exported="true"
+            android:label="@string/ime_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+    </application>
+</manifest>

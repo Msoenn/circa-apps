@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_media_bg">#2B2F45</color>
+    <color name="ic_weather_bg">#1F3A5C</color>
+    <color name="ic_agenda_bg">#2C3A2F</color>
+    <color name="ic_find_phone_bg">#3E2B3A</color>
+    <color name="ic_flashlight_bg">#3A3520</color>
+</resources>

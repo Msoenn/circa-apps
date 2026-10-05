@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Recents pills come from UsageStatsManager.queryUsageStats, which returns nothing unless this
+         appop is granted (`appops set org.circa.launcher GET_USAGE_STATS allow`). It is not
+         granted at install; without it the launcher simply hides the Recents section. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Face swipes open SystemUI's Circa shade (StatusBarManager.expandSettingsPanel /
+         expandNotificationsPanel). -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+
+    <!-- KEYCODE_STEM_PRIMARY (264) is a system key: PhoneWindowManager hands it to the focused
+         window only when its owner holds this permission (signature|privileged). With the AOSP
+         platform signature the launcher gets it, which is what makes the physical crown press reach
+         the app (see launcher/README.md). -->
+    <uses-permission
+        android:name="android.permission.OVERRIDE_SYSTEM_KEY_BEHAVIOR_IN_FOCUSED_WINDOW"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- v1.3a "return to the watch face": after a screen-off of 15s or more the launcher brings
+         itself back to the front on the face. That is a background activity launch, which the
+         platform only allows for a caller holding this permission (signature|privileged, see
+         frameworks/base services/core/java/com/android/server/wm/BackgroundActivityStartController).
+         The platform signature is what grants it; without it the wake still happens, it just lands
+         on whatever app was on screen before. -->
+    <uses-permission
+        android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- v1.4 steps complication: TYPE_STEP_COUNTER needs this runtime permission. It is not granted
+         at install; the launcher emulator smoke test grants it with `pm grant`, and without it the steps
+         complication shows its "no data" state. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- Lock screen (launcher/README.md): KeyguardManager.addKeyguardLockedStateListener tells the
+         launcher when the keyguard locks/unlocks, so the face can switch to its locked mode. -->
+    <uses-permission android:name="android.permission.SUBSCRIBE_TO_KEYGUARD_LOCKED_STATE" />
+
+    <!-- Always-on display (v1.6): while dozing, the panel is in STATE_DOZE_SUSPEND and the application
+         processor is suspended, so the platform's ACTION_TIME_TICK (a non-wakeup ELAPSED_REALTIME
+         alarm) is not delivered and the face needs its own exact wakeup alarm for the next whole
+         minute - AOSP SystemUI's DozeUi schedules the same (`AlarmManager.setExact`), and WatchLink
+         already uses this permission on this device. Denied at install for some apps; without it
+         `AlarmManager.canScheduleExactAlarms()` is false and the service falls back to
+         `setAndAllowWhileIdle`, which is a wakeup alarm too but may be batched. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Package visibility (API 30+): we must be able to see every launcher activity. This is an
+         intent-signature query, not QUERY_ALL_PACKAGES. The explicit package entry is WatchLink, whose
+         health ContentProvider (content://org.circa.watchlink.health) the face reads; without it
+         the provider is invisible to us on API 30+. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="org.circa.watchlink" />
+    </queries>
+
+    <!-- v1.2b tray. All of these are granted on the device because the launcher is signed with the
+         AOSP platform testkey (see launcher/README.md), except BLUETOOTH_CONNECT, which is a
+         runtime permission and is granted by the launcher emulator smoke test with `pm grant`. -->
+
+    <!-- Do Not Disturb: NotificationManager.setInterruptionFilter. The permission itself is
+         protectionLevel="normal" on this platform; the policy-access grant on top of it is what the
+         platform actually enforces, and it has to come from the shell (`cmd notification allow_dnd
+         org.circa.launcher`), see launcher/README.md. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_NOTIFICATION_POLICY"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- BluetoothAdapter.enable/disable: BLUETOOTH_PRIVILEGED is signature|privileged,
+         BLUETOOTH_CONNECT is a runtime permission. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- WifiManager.setWifiEnabled. Without NETWORK_SETTINGS the platform refuses the call for a
+         non-system app, and the tile falls back to Settings.Panel.ACTION_WIFI. -->
+    <uses-permission android:name="android.permission.NETWORK_SETTINGS" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- PowerManager.setPowerSaveModeEnabled (the modern name of the POWER_SAVER permission). -->
+    <uses-permission android:name="android.permission.DEVICE_POWER" />
+
+    <!-- Brightness: Settings.System.SCREEN_BRIGHTNESS + SCREEN_BRIGHTNESS_MODE. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!-- Notification stream: write Settings.Secure.enabled_notification_listeners so the launcher's
+         own listener is enabled on first run; also the shared accent (circa_accent_color) and the
+         first-run lock timeout default. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
+    <application
+        android:name=".AuroraApp"
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AuroraLauncher">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:screenOrientation="nosensor"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|layoutDirection|locale|keyboard|keyboardHidden|navigation|touchscreen">
+            <!-- configChanges: a launcher must not be relaunched by a configuration change. The
+                 battery-saver toggle alone changes uiMode (battery saver is a uiMode night bit) and
+                 would otherwise tear the tray down mid-tap. Compose picks the new configuration up
+                 from `View.onConfigurationChanged` by itself. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- The crown's short press when another app is on screen reaches the launcher by
+                 component instead (config_primaryShortPressTargetActivity in the aurora-round RRO, see
+                 launcher/README.md); this filter keeps the explicit android.intent.action.ALL_APPS
+                 starts working. android:priority cannot be used to win the resolution against AOSP
+                 Launcher3's identical filter: measured on the android-36 emulator image, the installed
+                 filter still reports priority=0 and the action resolves to ResolverActivity. -->
+            <intent-filter>
+                <action android:name="android.intent.action.ALL_APPS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Circa side button (POWER short press while the screen is on, not keyguarded):
+                 PhoneWindowManager sends org.circa.intent.action.SHOW_RECENTS explicitly to the HOME
+                 package (launcher/README.md). -->
+            <intent-filter>
+                <action android:name="org.circa.intent.action.SHOW_RECENTS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Circa Settings (org.circa.settings) > Display > Watch face opens the face picker; the
+                 face is the launcher's own preference (launcher/README.md). -->
+            <intent-filter>
+                <action android:name="org.circa.intent.action.PICK_FACE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- v1.2b notification stream. A listener in the launcher's own process (no GMS, no
+             companion app): it is enabled on first run through WRITE_SECURE_SETTINGS, or by
+             `cmd notification allow_listener` from the smoke script. -->
+        <service
+            android:name=".LauncherNotificationListener"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- v1.3a always-on display. The platform's doze component (config_dozeComponent in the
+             aurora-doze RRO points here): while the power manager is dozing, DreamManagerService
+             binds this service and shows the static watch face on the low-power panel. A doze
+             component must be a DreamService whose declaration carries
+             android.permission.BIND_DREAM_SERVICE (DreamManagerService.validateDream checks the
+             service declaration, resolved by component), and it must be declared the way SystemUI's
+             own DozeService is (the intent filter below) for the framework's bind to match; nothing
+             else - not being a system app, not DEVICE_POWER - is required of it. -->
+        <service
+            android:name=".AmbientDreamService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- play triangle with rounded look + two skip bars -->
+    <path android:fillColor="#8AB4F8" android:pathData="M44,34 L44,74 Q44,78 47.5,76 L76,56 Q79,54 76,52 L47.5,32 Q44,30 44,34 Z" />
+</vector>

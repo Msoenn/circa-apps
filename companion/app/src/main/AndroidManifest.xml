@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Circa Companion (companion/README.md): five launcher entries (Media, Weather, Agenda, Find phone,
+  Flashlight) in one platform-signed priv-app on /product. The first four read WatchLink's phone-data provider
+  (watchlink/DATA-CONTRACT.md), which only answers system org.circa.* packages. No permissions, no INTERNET.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Package visibility (targetSdk 36): the provider lives in another package. -->
+    <queries>
+        <provider android:authorities="org.circa.watchlink.data" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_media"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Companion">
+
+        <activity
+            android:name=".MediaActivity"
+            android:label="@string/label_media"
+            android:icon="@mipmap/ic_media"
+            android:roundIcon="@mipmap/ic_media"
+            android:exported="true"
+            android:taskAffinity="org.circa.companion.media"
+            android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density"
+            android:screenOrientation="nosensor">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".WeatherActivity"
+            android:label="@string/label_weather"
+            android:icon="@mipmap/ic_weather"
+            android:roundIcon="@mipmap/ic_weather"
+            android:exported="true"
+            android:taskAffinity="org.circa.companion.weather"
+            android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density"
+            android:screenOrientation="nosensor">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".AgendaActivity"
+            android:label="@string/label_agenda"
+            android:icon="@mipmap/ic_agenda"
+            android:roundIcon="@mipmap/ic_agenda"
+            android:exported="true"
+            android:taskAffinity="org.circa.companion.agenda"
+            android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density"
+            android:screenOrientation="nosensor">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".FindPhoneActivity"
+            android:label="@string/label_find_phone"
+            android:icon="@mipmap/ic_find_phone"
+            android:roundIcon="@mipmap/ic_find_phone"
+            android:exported="true"
+            android:taskAffinity="org.circa.companion.findphone"
+            android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density"
+            android:screenOrientation="nosensor">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".FlashlightActivity"
+            android:label="@string/label_flashlight"
+            android:icon="@mipmap/ic_flashlight"
+            android:roundIcon="@mipmap/ic_flashlight"
+            android:theme="@style/Theme.Companion.Flashlight"
+            android:exported="true"
+            android:taskAffinity="org.circa.companion.flashlight"
+            android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density"
+            android:screenOrientation="nosensor">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

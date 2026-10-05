@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Clock</string>
+    <string name="channel_ring">Alarms and timers ringing</string>
+    <string name="channel_timer">Running timer</string>
+    <string name="channel_stopwatch">Running stopwatch</string>
+    <string name="channel_missed">Missed alarms</string>
+</resources>

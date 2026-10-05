@@ -1,0 +1,131 @@
+# Circa Material Symbols (Rounded) - the one icon set every Circa UI uses.
+#
+# Input to tools/gen-symbols.py. One entry per line:
+#
+#   <name> [target ...]
+#
+# <name> is a Material Symbols name from google/material-design-icons
+# (symbols/web/<name>/materialsymbolsrounded/). Both the filled
+# (<name>_fill1_24px.svg) and the outlined (<name>_24px.svg) variant are fetched
+# and emitted as `CircaSymbols.Filled.<PascalName>` / `CircaSymbols.Outlined.<PascalName>`.
+#
+# Optional targets also emit a platform vector drawable (for code that cannot use
+# the Compose ImageVector):
+#
+#   sysui     -> <SystemUI>/res/drawable/circa_ic_<name>.xml            (filled)
+#   keyboard  -> apps/keyboard/.../res/drawable/circa_ic_<name>.xml     (filled)
+#                                            circa_ic_<name>_outlined.xml (outlined)
+#
+# Blank lines and # comments are ignored. Run:  tools/gen-symbols.py
+
+# --- launcher / settings / clock / companion ------------------------------------------------------------
+add
+accessibility_new
+alarm
+apps
+battery_android_full
+battery_saver
+bluetooth
+bluetooth_searching
+brightness_auto
+brightness_medium  sysui
+call
+cell_tower
+check
+close
+computer
+delete
+directions_walk
+do_not_disturb_on
+edit
+event_available
+favorite
+flag
+flight
+format_bold
+format_size
+headphones
+hourglass_top
+info
+invert_colors
+keyboard
+language
+link
+link_off
+location_on
+lock
+lock_clock
+mobile_off
+notifications
+palette
+pause
+pin
+play_arrow
+power_settings_new
+remove
+restart_alt
+schedule
+search  keyboard
+settings  sysui
+skip_next
+skip_previous
+smartphone
+stop
+storage
+timer
+touch_app
+tune
+vibration
+visibility  keyboard
+visibility_off  keyboard
+volume_up
+wallpaper
+watch
+wifi
+
+# --- exercise (apps/exercise) --------------------------------------------------------------------------
+avg_pace
+directions_bike
+directions_run
+distance
+exercise
+fitness_center
+hiking
+local_fire_department
+more_horiz
+pause_circle
+pool
+rowing
+route
+satellite_alt
+self_improvement
+sports_gymnastics
+speed
+sprint
+steps
+trophy
+cake
+height
+monitor_weight
+person
+undo
+
+# --- weather (launcher watch-face complication + companion Weather) -----------------------------------
+cloud
+foggy
+partly_cloudy_day
+rainy
+sunny
+thunderstorm
+weather_snowy
+
+# --- SystemUI QS-tile pipeline drawables ----------------------------------------------------------------
+movie  sysui
+
+# --- keyboard (drawn on a Canvas, so it needs platform VectorDrawables) --------------------------------
+backspace  keyboard
+keyboard_capslock  keyboard
+keyboard_hide  keyboard
+keyboard_return  keyboard
+shift  keyboard
+space_bar  keyboard
