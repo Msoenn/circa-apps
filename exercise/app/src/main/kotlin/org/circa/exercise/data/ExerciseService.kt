@@ -20,6 +20,9 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import org.circa.exercise.model.ActivityType
+import org.circa.exercise.model.AutoInterval
+import org.circa.exercise.model.AutoParams
+import org.circa.exercise.model.AutoRules
 import org.circa.exercise.model.Badges
 import org.circa.exercise.model.Phase
 import org.circa.exercise.model.Summary
@@ -51,7 +54,7 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
     private val ticker = object : Runnable {
         override fun run() {
             onTick()
-            main.postDelayed(this, 1000)
+            if (workout != null) main.postDelayed(this, 1000)
         }
     }
 
@@ -67,6 +70,11 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         if (workout == null) workout = storage.loadActive()?.takeIf { it.isActive }
         when (intent?.action) {
             ACTION_START -> ActivityType.fromId(intent.getStringExtra(EXTRA_TYPE))?.let { start(it) }
+            ACTION_START_AUTO -> ActivityType.fromId(intent.getStringExtra(EXTRA_TYPE))?.let {
+                startAuto(it, AutoInterval.decodeAll(intent.getStringExtra(EXTRA_INTERVALS)), intent.getIntExtra(EXTRA_THR, AutoParams.DEFAULT_THRESHOLD_BPM))
+            }
+            ACTION_AUTO_KEEP -> keepAuto()
+            ACTION_AUTO_DISCARD -> if (workout?.auto == true) discard()
             ACTION_TOGGLE -> workout?.let { if (it.phase == Phase.RECORDING) pause() else resume() }
             ACTION_PAUSE -> pause()
             ACTION_RESUME -> resume()
@@ -101,6 +109,35 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         Haptics.tap(this)
     }
 
+    /**
+     * An auto-detected walk/run (see [AutoDetector]): a recording backdated to the first elevated sample, with the
+     * intervals that proved it folded in (HR, zones, calories, steps; no GPS before now). It starts undecided: a
+     * high-importance notification asks Keep / Discard, and no answer keeps it after [AutoParams.DECIDE_MS].
+     */
+    private fun startAuto(type: ActivityType, intervals: List<AutoInterval>, thresholdBpm: Int) {
+        if (workout?.isActive == true || intervals.isEmpty()) return
+        storage.loadPending()?.let { storage.commit(it) ; Live.pending.value = null }
+        val p = Live.profile(this)
+        val year = Year.now().value
+        val now = System.currentTimeMillis()
+        val w = Workout(type, intervals.first().startMs, p.maxHr(year), p.age(year), p.weight, p.effectiveSex)
+        w.markAuto(now, thresholdBpm)
+        val backfilled = w.backfill(intervals, now)
+        storage.begin(w)
+        workout = w
+        rows += backfilled
+        flush(force = true)
+        Haptics.detected(this)
+    }
+
+    private fun keepAuto() {
+        val w = workout ?: return
+        if (!w.autoPending) return
+        w.keepAuto()
+        flush(force = true)
+        goForeground(w)   // the card becomes the normal ongoing workout notification
+    }
+
     private fun pause() {
         val w = workout ?: return
         if (w.phase != Phase.RECORDING) return
@@ -120,9 +157,10 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         goForeground(w)
     }
 
-    private fun end() {
+    private fun end(commit: Boolean = false) {
         val w = workout ?: return
         if (!w.isActive) return
+        if (w.auto) AutoDetect.noteEnded(this, System.currentTimeMillis())
         w.tick(System.currentTimeMillis(), Live.fakeHr)?.let { rows += it.csvRow }
         w.finish(System.currentTimeMillis())
         flush(force = true)
@@ -131,8 +169,14 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         val history = storage.history()
         val base = Summary.from(w)
         val summary = base.copy(badges = Badges.compute(base, history, ZoneId.systemDefault()))
-        io.submit { storage.savePending(summary) }
-        Live.pending.value = summary
+        if (commit) {
+            // An auto workout that ended by itself nobody is watching: saved (and so synced) at once.
+            io.submit { runCatching { storage.commit(summary) }.onFailure { Log.w(TAG, "commit failed", it) } }
+            Notifs.saved(this, summary)
+        } else {
+            io.submit { storage.savePending(summary) }
+            Live.pending.value = summary
+        }
         workout = null
         Live.view.value = null
         // Notify after the flush/scrub/save that precede it on the single-thread executor: the provider then reads the
@@ -142,6 +186,7 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
     }
 
     private fun discard() {
+        if (workout?.auto == true) AutoDetect.noteEnded(this, System.currentTimeMillis())
         workout = null
         rows.clear()
         Live.view.value = null
@@ -166,6 +211,14 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         val w = workout ?: return
         val now = System.currentTimeMillis()
         val r = w.tick(now, Live.fakeHr)
+        if (w.auto) {
+            if (w.autoPending && AutoRules.decisionDue(w.autoDetectedAt, now)) keepAuto()
+            if (w.autoRestExceeded(now)) {
+                // 5 minutes at rest: the auto workout is over. Too short = dropped (nothing saved), else saved.
+                if (AutoRules.shouldDrop(w.startMs, w.autoLastActive())) discard() else end(commit = true)
+                return
+            }
+        }
         if (r != null) {
             rows += r.csvRow
             if (r.zoneAnnounced) Haptics.zone(this)
@@ -198,13 +251,14 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
             zone = org.circa.exercise.model.Zones.zoneOf(hr, w.maxHr), maxHr = w.maxHr,
             distanceM = w.distanceM, paceSecPerKm = w.recentPace(), speedKmh = w.recentSpeedKmh(),
             kcal = w.kcal, steps = w.steps, zoneMs = w.zoneMs.toList(), gps = gps, startMs = w.startMs,
+            auto = w.auto, autoPending = w.autoPending,
         )
     }
 
     private fun granted(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
     private fun goForeground(w: Workout) {
-        val n = Notifs.workout(this, w)
+        val n = if (w.autoPending) Notifs.detected(this, w) else Notifs.workout(this, w)
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
         if (w.type.gps && granted(Manifest.permission.ACCESS_FINE_LOCATION)) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         try {
@@ -295,9 +349,26 @@ class ExerciseService : Service(), SensorEventListener, LocationListener {
         const val ACTION_END = "org.circa.exercise.END"
         const val ACTION_DISCARD = "org.circa.exercise.DISCARD"
         const val ACTION_RESTORE = "org.circa.exercise.RESTORE"
+        const val ACTION_START_AUTO = "org.circa.exercise.START_AUTO"
+        const val ACTION_AUTO_KEEP = "org.circa.exercise.AUTO_KEEP"
+        const val ACTION_AUTO_DISCARD = "org.circa.exercise.AUTO_DISCARD"
+        const val EXTRA_INTERVALS = "intervals"
+        const val EXTRA_THR = "thr"
         const val EXTRA_TYPE = "type"
         private const val FLUSH_MS = 5_000L
         private const val GPS_LOST_MS = 15_000L
+
+        /**
+         * Start an auto recording from the background (a WatchLink sample arrived). A foreground service started from
+         * the background needs an exemption; this app holds START_FOREGROUND_SERVICES_FROM_BACKGROUND (privapp
+         * allowlist in device/circa), and the refusal is logged rather than crashing the receiver.
+         */
+        fun startAuto(ctx: Context, type: ActivityType, intervals: String, thresholdBpm: Int) {
+            val i = Intent(ctx, ExerciseService::class.java).setAction(ACTION_START_AUTO)
+                .putExtra(EXTRA_TYPE, type.id).putExtra(EXTRA_INTERVALS, intervals).putExtra(EXTRA_THR, thresholdBpm)
+            try { ctx.startForegroundService(i) }
+            catch (e: Exception) { Log.e(TAG, "cannot start the auto recording from the background", e) }
+        }
 
         fun send(ctx: Context, action: String, type: ActivityType? = null) {
             val i = Intent(ctx, ExerciseService::class.java).setAction(action)

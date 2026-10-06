@@ -955,6 +955,11 @@ class WatchLinkService : Service(), BleServer.Listener {
                 + (if (w.lastBpm() > 0) " bpm=" + w.lastBpm() else " no-reading")
                 + (if (hrBatched) " bucket-batched" else ""))
         hrBatched = false
+        // The 5-minute sample (HR + steps so far today) goes to the exercise app's walk/run detection.
+        if (w.lastBpm() > 0) {
+            val steps = HealthStore.snapshot().stepsToday()
+            if (steps != null) ExerciseLink.send(this, HealthStore.nowMs(), w.lastBpm(), steps)
+        }
     }
 
     private fun scheduleBucket() {

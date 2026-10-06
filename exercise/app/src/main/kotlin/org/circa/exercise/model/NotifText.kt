@@ -17,4 +17,16 @@ object NotifText {
      * (unpaused) time. With pauses before, this is not the workout's start but the start shifted back by them.
      */
     fun chronoBase(now: Long, activeMs: Long): Long = now - activeMs
+
+    /** "Walk detected" / "Run detected". */
+    fun detectedTitle(type: ActivityType): String = "${type.label} detected"
+
+    /** [since] is the backdated start as shown, e.g. "3:42 PM". */
+    fun detectedText(since: String): String = "Recording since $since"
+
+    fun savedTitle(type: ActivityType): String = "${type.label} saved"
+
+    /** "42:10 · 3.21 km" (distance only for GPS activities). */
+    fun savedText(activeMs: Long, distanceM: Double, gps: Boolean): String =
+        Fmt.duration(activeMs) + if (gps && distanceM >= 10) " · " + Fmt.km(distanceM) + " km" else ""
 }

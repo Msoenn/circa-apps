@@ -26,6 +26,9 @@ object ProfileKeys {
     /** Settings.Secure, int bpm; 0 or absent = automatic (estimated from age by the Exercise app). */
     const val MAX_HR = "circa_profile_max_hr"
 
+ /** Settings.Secure, int: 0 = off, anything else or absent = on (default). The Exercise app auto-detects walks and runs. */
+    const val AUTO_DETECT = "circa_auto_detect"
+
     /** Settings.Global, "list" | "last" | "power"; absent = "list". Read by the framework and the Exercise app. */
     const val LONG_PRESS = "circa_exercise_long_press"
 }
@@ -85,6 +88,9 @@ enum class ProfileField(
 }
 
 object ProfileModel {
+    /** `circa_auto_detect`: only an explicit 0 turns the Exercise app's walk/run auto-detection off. */
+    fun autoDetectOn(raw: String?): Boolean = raw?.trim() != "0"
+
     /** Youngest allowed age for the birth-year picker. */
     private const val MIN_AGE = 5
 

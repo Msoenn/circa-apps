@@ -15,12 +15,23 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Auto-detection starts recording from the background: the location foreground-service type is only accepted
+         there with this (default-permissions grant in device/circa). Without it the recording starts health-only and
+         adds GPS once the app is opened. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Auto-detection starts the recording service from a WatchLink broadcast, i.e. from the background (privapp allowlist). -->
+    <uses-permission android:name="android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND" tools:ignore="ProtectedPermissions" />
     <!-- The side button (KEYCODE_STEM_PRIMARY) reaches the focused window first: pause/resume while recording
          (privapp-permissions; exercise/README.md). -->
     <uses-permission android:name="android.permission.OVERRIDE_SYSTEM_KEY_BEHAVIOR_IN_FOCUSED_WINDOW" tools:ignore="ProtectedPermissions" />
+
+    <!-- The sender check of WatchLink's HR-sample broadcast resolves the sender uid's packages (SampleReceiver). -->
+    <queries>
+        <package android:name="org.circa.watchlink" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -80,13 +91,23 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
-        <!-- Emulator aid (fake heart rate). DUMP: only shell / system can send it; ignored on user builds. -->
+        <!-- WatchLink's 5-minute HR sample (explicit-package broadcast, sender identity checked in code: SampleReceiver). -->
+        <receiver
+            android:name=".data.SampleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.circa.exercise.action.HR_SAMPLE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Emulator aid (fake heart rate, synthetic samples). DUMP: only shell / system can send it; ignored on user builds. -->
         <receiver
             android:name=".data.DebugReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="org.circa.exercise.DEBUG_HR" />
+                <action android:name="org.circa.exercise.DEBUG_SAMPLES" />
             </intent-filter>
         </receiver>
     </application>

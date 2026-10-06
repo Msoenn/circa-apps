@@ -26,6 +26,16 @@ class DebugGbLineReceiver : BroadcastReceiver() {
             Log.i(TAG, "DEBUG_GB_LINE connected=$on")
             resultData = "connected=$on"
         }
+        // Fire the exercise app's HR-sample broadcast (the real sender path): --es hr_sample "bpm,steps"
+        i.getStringExtra("hr_sample")?.let { spec ->
+            val f = spec.split(",").map { it.trim() }
+            val bpm = f.getOrNull(0)?.toIntOrNull() ?: 0
+            val steps = f.getOrNull(1)?.toLongOrNull() ?: -1L
+            ExerciseLink.send(c, System.currentTimeMillis(), bpm, steps)
+            Log.i(TAG, "DEBUG_GB_LINE hr_sample bpm=$bpm steps=$steps")
+            resultData = "hr_sample bpm=$bpm steps=$steps"
+            return
+        }
         var line = i.getStringExtra("line")?.trim()
         if (line.isNullOrEmpty()) {
             if (i.hasExtra("connected")) return

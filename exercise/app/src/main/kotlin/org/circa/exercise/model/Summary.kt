@@ -28,6 +28,8 @@ data class Summary(
     val route: List<DoubleArray>,
     val steps: Long,
     val badges: List<Badge> = emptyList(),
+    /** Recorded by the walk/run auto-detection ("Auto-detected" in the summary). */
+    val auto: Boolean = false,
 ) {
     /** Minutes in zones 4 and 5. */
     val hardMs: Long get() = zoneMs.getOrElse(4) { 0L } + zoneMs.getOrElse(5) { 0L }
@@ -42,6 +44,7 @@ data class Summary(
         put("zoneMs", JSONArray(zoneMs)); put("splitsMs", JSONArray(splitsMs))
         put("route", JSONArray().also { a -> route.forEach { p -> a.put(JSONArray().put(p[0]).put(p[1])) } })
         put("steps", steps)
+        if (auto) put("auto", true)
         put("badges", JSONArray().also { a -> badges.forEach { b -> a.put(JSONObject().put("kind", b.kind.name).put("label", b.label)) } })
     }
 
@@ -50,7 +53,7 @@ data class Summary(
             id = id, type = w.type, startMs = w.startMs, endMs = w.endMs ?: w.startMs,
             activeMs = w.activeMs(w.endMs ?: w.startMs), distanceM = w.distanceM, kcal = w.kcal,
             hrAvg = w.hrAvg, hrMax = w.hrMax, zoneMs = w.zoneMs.toList(), splitsMs = w.splitDurations(),
-            route = w.route.toList(), steps = w.steps,
+            route = w.route.toList(), steps = w.steps, auto = w.auto,
         )
 
         fun fromJson(o: JSONObject): Summary {
@@ -64,6 +67,7 @@ data class Summary(
                 zoneMs = longs("zoneMs"), splitsMs = longs("splitsMs"),
                 route = o.optJSONArray("route")?.let { a -> (0 until a.length()).map { i -> a.getJSONArray(i).let { p -> doubleArrayOf(p.getDouble(0), p.getDouble(1)) } } } ?: emptyList(),
                 steps = o.optLong("steps"),
+                auto = o.optBoolean("auto"),
                 badges = o.optJSONArray("badges")?.let { a ->
                     (0 until a.length()).mapNotNull { i ->
                         val b = a.getJSONObject(i)

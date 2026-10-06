@@ -64,6 +64,8 @@ data class SettingsSnapshot(
     val profile: Profile = Profile(),
     /** Settings.Global circa_exercise_long_press. */
     val longPress: LongPressAction = LongPressAction.DEFAULT,
+    /** Settings.Secure circa_auto_detect: the Exercise app's walk/run auto-detection (default on). */
+    val autoDetect: Boolean = true,
 )
 
 /**
@@ -123,6 +125,7 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
                 ?.takeIf { it in 0..100 },
             profile = readProfile(),
             longPress = LongPressAction.fromRaw(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.LONG_PRESS))),
+            autoDetect = ProfileModel.autoDetectOn(getRaw(SettingKey(SettingsTable.SECURE, ProfileKeys.AUTO_DETECT))),
         )
     }
 
@@ -204,6 +207,9 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
     /** null = not set (the key's value is cleared). */
     fun setSex(sex: Sex?): Boolean =
         runCatching { Settings.Secure.putString(resolver, ProfileKeys.SEX, sex?.value) }.getOrDefault(false)
+
+    fun setAutoDetect(on: Boolean): Boolean =
+        runCatching { Settings.Secure.putInt(resolver, ProfileKeys.AUTO_DETECT, if (on) 1 else 0) }.getOrDefault(false)
 
     fun setLongPress(action: LongPressAction): Boolean =
         runCatching { Settings.Global.putString(resolver, ProfileKeys.LONG_PRESS, action.value) }.getOrDefault(false)

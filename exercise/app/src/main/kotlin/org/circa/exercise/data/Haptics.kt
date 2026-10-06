@@ -14,6 +14,9 @@ object Haptics {
 
     fun zone(ctx: Context) = vibe(ctx, VibrationEffect.createWaveform(longArrayOf(0, 90, 90, 90), -1))
 
+    /** One firm buzz: an auto-detected workout started. */
+    fun detected(ctx: Context) = vibe(ctx, VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE))
+
     fun warn(ctx: Context) = vibe(ctx, VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE))
 
     fun happy(ctx: Context) = vibe(

@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Exercise</string>
     <string name="channel_workout">Workout in progress</string>
+    <string name="channel_detected">Workout detected</string>
 </resources>

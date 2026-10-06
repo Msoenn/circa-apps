@@ -41,6 +41,8 @@
         <package android:name="org.circa.launcher" />
         <!-- The Exercise app's workout provider (listRecs / fetchRec and the live workout kind; ExerciseSource). -->
         <provider android:authorities="org.circa.exercise.sync" />
+        <!-- The exercise app receives the 5-minute HR sample broadcast (ExerciseLink). -->
+        <package android:name="org.circa.exercise" />
     </queries>
 
     <application android:label="WatchLink" android:hasCode="true" android:allowBackup="false"

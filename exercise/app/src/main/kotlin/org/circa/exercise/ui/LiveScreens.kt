@@ -6,7 +6,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -132,7 +135,7 @@ private fun SmallStat(icon: ImageVector?, iconTint: Color, value: String, label:
 
 /** The live screen: one big stat per crown page inside the two zone rings. */
 @Composable
-internal fun LiveScreen(v: LiveView, page: Int, onPage: (Int) -> Unit) {
+internal fun LiveScreen(v: LiveView, page: Int, onPage: (Int) -> Unit, onKeepAuto: () -> Unit = {}, onDiscardAuto: () -> Unit = {}) {
     val pages = pagesFor(v.type)
     val p = pages[page.coerceIn(0, pages.size - 1)]
     val searching = v.gps == GpsState.SEARCHING
@@ -152,9 +155,13 @@ internal fun LiveScreen(v: LiveView, page: Int, onPage: (Int) -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         ZoneRings(v)
-        if (v.phase != Phase.PAUSED) GpsIcon(v.gps, Modifier.align(Alignment.TopCenter).offset(y = 24.dp))
+        if (v.phase != Phase.PAUSED && !v.autoPending) GpsIcon(v.gps, Modifier.align(Alignment.TopCenter).offset(y = 24.dp))
         AnimatedContent(targetState = p, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "page") { pg ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.testTag("page_${pg.name.lowercase()}")) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                // An undecided auto workout: the banner takes the top, the stat moves down a little.
+                modifier = Modifier.offset(y = if (v.autoPending) 25.dp else 0.dp).testTag("page_${pg.name.lowercase()}"),
+            ) {
                 when (pg) {
                     LivePage.TIME -> {
                         // GPS activities: "finding GPS…" under the clock until the first fix (design round 2, GPS mock)
@@ -196,11 +203,42 @@ internal fun LiveScreen(v: LiveView, page: Int, onPage: (Int) -> Unit) {
                 }
             }
         }
-        if (v.phase == Phase.PAUSED) {
+        if (v.phase == Phase.PAUSED && !v.autoPending) {
             Text("PAUSED", color = AMBER, fontSize = 12.sp, letterSpacing = 1.5.sp, maxLines = 1,
                 modifier = Modifier.align(Alignment.TopCenter).offset(y = 26.dp).testTag("paused_label"))
         }
-        PageDots(pages.size, pages.indexOf(p), Modifier.align(Alignment.BottomCenter).offset(y = (-28).dp))
+        if (!v.autoPending) PageDots(pages.size, pages.indexOf(p), Modifier.align(Alignment.BottomCenter).offset(y = (-28).dp))
+        if (v.autoPending) AutoBanner(v, onKeepAuto, onDiscardAuto, Modifier.align(Alignment.TopCenter).offset(y = 27.dp))
+    }
+}
+
+/** "Walk detected" with the same Keep / Discard choice as the notification (no answer = keep after 2 minutes). */
+@Composable
+private fun AutoBanner(v: LiveView, onKeep: () -> Unit, onDiscard: () -> Unit, modifier: Modifier) {
+    Column(modifier.testTag("auto_banner"), horizontalAlignment = Alignment.CenterHorizontally) {
+        // Paused (the side button works as ever): the title says so, in the PAUSED label's amber.
+        if (v.phase == Phase.PAUSED) Text("PAUSED", fontSize = 12.sp, color = AMBER, letterSpacing = 1.5.sp, maxLines = 1,
+            modifier = Modifier.testTag("auto_title"))
+        else Text("${v.type.label} detected", fontSize = 12.sp, color = Color.White, maxLines = 1, softWrap = false,
+            modifier = Modifier.testTag("auto_title"))
+        Spacer(Modifier.height(3.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            BannerButton("Keep", CircaSymbols.Filled.Check, ACCENT, ON_ACCENT_DARK, "btn_auto_keep", onKeep)
+            BannerButton("Discard", CircaSymbols.Filled.Delete, TONAL, Color.White, "btn_auto_discard", onDiscard)
+        }
+    }
+}
+
+@Composable
+private fun BannerButton(label: String, icon: ImageVector, bg: Color, fg: Color, tag: String, onClick: () -> Unit) {
+    Row(
+        Modifier.height(28.dp).clip(RoundedCornerShape(50)).background(bg).clickable(onClick = onClick)
+            .padding(horizontal = 7.dp).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = fg, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(2.dp))
+        Text(label, fontSize = 11.sp, color = fg, maxLines = 1, softWrap = false)
     }
 }
 

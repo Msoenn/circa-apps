@@ -91,13 +91,16 @@ internal fun SummaryScreen(s: Summary, onDone: () -> Unit) {
                     )
                     // The headline already says the top badge ("First run!", "New longest run!"): no chip repeating it.
                     val chips = s.badges.filter { it.kind != Badges.headlineKind(s) }
-                    if (chips.isNotEmpty()) {
+                    if (chips.isNotEmpty() || s.auto) {
                         Spacer(Modifier.height(8.dp))
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(horizontal = 12.dp),
-                        ) { chips.forEach { BadgeChip(it) } }
+                        ) {
+                            chips.forEach { BadgeChip(it) }
+                            if (s.auto) AutoChip()
+                        }
                     }
                     Spacer(Modifier.height(6.dp))
                     Text("Scroll for details", fontSize = 10.sp, color = DIM, maxLines = 1)
@@ -132,6 +135,20 @@ internal fun SummaryScreen(s: Summary, onDone: () -> Unit) {
             }
         }
         Confetti()
+    }
+}
+
+/** Marks a workout the app detected by itself. */
+@Composable
+private fun AutoChip() {
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(TONAL).heightIn(min = 26.dp).padding(horizontal = 9.dp, vertical = 4.dp)
+            .testTag("badge_auto"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(CircaSymbols.Filled.Watch, null, tint = ACCENT, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Auto-detected", fontSize = 11.sp, color = Color.White, maxLines = 1, softWrap = false)
     }
 }
 

@@ -45,6 +45,16 @@ class Workout(
     val route = mutableListOf<DoubleArray>()
     var steps = 0L; private set
 
+    /** Auto-detected walk/run ([org.circa.exercise.model.AutoDetector]); false for every manual workout. */
+    var auto = false; private set
+    /** An auto workout still waiting for Keep / Discard (no answer after [AutoParams.DECIDE_MS] = keep). */
+    var autoPending = false; private set
+    /** When the detector fired (wall clock); the recording itself is backdated to [startMs]. */
+    var autoDetectedAt = 0L; private set
+    private var rest: RestTracker? = null
+    /** The HR threshold the auto-end uses (the one the detection used). */
+    private var autoThr = AutoParams.DEFAULT_THRESHOLD_BPM
+
     private var lastStepCounter: Long? = null
     private var lastHr: Int? = null
     private var lastHrAt = 0L
@@ -83,6 +93,7 @@ class Workout(
 
     fun resume(now: Long) {
         if (phase != Phase.PAUSED) return
+        rest?.lastActiveMs = now
         segmentStart = now
         lastTickAt = now
         anchor = null
@@ -95,6 +106,58 @@ class Workout(
         if (phase == Phase.RECORDING) pause(now)
         phase = Phase.FINISHED
         endMs = now
+    }
+
+    /** Marks this recording as auto-detected at [now] with the HR threshold [thresholdBpm]; it starts undecided. */
+    fun markAuto(now: Long, thresholdBpm: Int) {
+        auto = true; autoPending = true; autoDetectedAt = now; autoThr = thresholdBpm
+        rest = RestTracker(now, thresholdBpm)
+    }
+
+    fun keepAuto() { autoPending = false }
+
+    /** The auto workout has been at rest for [AutoParams.REST_END_MS] (never while paused). */
+    fun autoRestExceeded(now: Long): Boolean = auto && phase == Phase.RECORDING && rest?.shouldEnd(now) == true
+
+    /** The last moment of activity of an auto workout (for the 10-minute rule). */
+    fun autoLastActive(): Long = rest?.lastActiveMs ?: startMs
+
+    /**
+     * Fold the intervals that proved the detection into a recording that starts at their beginning: zone time,
+     * calories, HR average and steps, one CSV row per second up to (not including) [now] with the HR on the second of
+     * each sample and the interval's steps spread over its seconds. GPS cannot be recovered. Returns those rows.
+     */
+    fun backfill(intervals: List<AutoInterval>, now: Long): List<String> {
+        val rows = ArrayList<String>()
+        val hrAt = HashMap<Long, Int>()
+        val stepsAt = HashMap<Long, Long>()
+        for (iv in intervals) {
+            val durMs = iv.endMs - iv.startMs
+            if (durMs <= 0) continue
+            val sec = durMs / 1000.0
+            zoneMs[Zones.zoneOf(iv.bpm, maxHr)] += durMs
+            hrSum += Math.round(iv.bpm * sec); hrSamples += Math.round(sec); hrMax = max(hrMax, iv.bpm)
+            kcal += Calories.keytelPerMinute(iv.bpm, weightKg, age, sex) * sec / 60.0
+            steps += iv.steps
+            // the last sample is at (about) now, whose second the live tick writes: it goes on the second before
+            hrAt[min(iv.endMs / 1000, now / 1000 - 1)] = iv.bpm
+            val first = iv.startMs / 1000; val last = iv.endMs / 1000 - 1
+            val n = last - first + 1
+            for (i in 0 until n) stepsAt[first + i] = iv.steps / n + (if (i < iv.steps % n) 1 else 0)
+        }
+        var t = startMs / 1000
+        val end = now / 1000
+        while (t < end) {
+            val hr = hrAt[t]
+            rows += BangleCsv.row(
+                timeSec = t, lat = null, lon = null, alt = null, hr = hr,
+                confidence = if (hr != null) 100 else null, source = if (hr != null) "int" else null,
+                steps = (stepsAt[t] ?: 0L).toInt(),
+            )
+            t++
+        }
+        lastTickAt = now
+        return rows
     }
 
     fun onHr(bpm: Int, now: Long) {
@@ -202,6 +265,7 @@ class Workout(
             steps = rowSteps.toInt(),
         )
         rowFix = null; rowSteps = 0
+        rest?.onTick(now, hr, steps)
         return TickResult(row, zone, announced)
     }
 
@@ -240,6 +304,10 @@ class Workout(
         firstFixAt?.let { put("firstFixAt", it) }
         put("lastTickAt", lastTickAt)
         put("announcedZone", announcedZone)
+        if (auto) {
+            put("auto", true); put("autoPending", autoPending); put("autoAt", autoDetectedAt); put("autoThr", autoThr)
+            put("lastActive", autoLastActive())
+        }
         put("gpsDrop", JSONArray().also { a -> gpsDropSpans.forEach { a.put(JSONArray().put(it[0]).put(it[1])) } })
     }
 
@@ -276,6 +344,11 @@ class Workout(
             w.lastTickAt = o.optLong("lastTickAt", w.startMs)
             w.announcedZone = o.optInt("announcedZone", 0)
             w.candidateZone = w.announcedZone
+            if (o.optBoolean("auto")) {
+                w.auto = true; w.autoPending = o.optBoolean("autoPending"); w.autoDetectedAt = o.optLong("autoAt")
+                w.autoThr = o.optInt("autoThr", AutoParams.DEFAULT_THRESHOLD_BPM)
+                w.rest = RestTracker(o.optLong("lastActive", w.lastTickAt), w.autoThr)
+            }
             o.optJSONArray("gpsDrop")?.let { a -> for (i in 0 until a.length()) a.getJSONArray(i).let { p -> w.gpsDropSpans += longArrayOf(p.getLong(0), p.getLong(1)) } }
             return w
         }

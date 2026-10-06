@@ -63,6 +63,16 @@ class ProfileModelTest {
     }
 
     @Test
+    fun autoDetectDefaultsToOn() {
+        assertEquals("circa_auto_detect", ProfileKeys.AUTO_DETECT)
+        assertEquals(true, ProfileModel.autoDetectOn(null))
+        assertEquals(true, ProfileModel.autoDetectOn("1"))
+        assertEquals(true, ProfileModel.autoDetectOn("garbage"))
+        assertEquals(false, ProfileModel.autoDetectOn("0"))
+        assertEquals(false, ProfileModel.autoDetectOn(" 0 "))
+    }
+
+    @Test
     fun pagesHangUnderMain() {
         assertEquals(SettingsPage.MAIN, SettingsPage.PROFILE.parent)
         assertEquals(SettingsPage.PROFILE_MAX_HR, SettingsPage.PROFILE_MAX_HR_VALUE.parent)

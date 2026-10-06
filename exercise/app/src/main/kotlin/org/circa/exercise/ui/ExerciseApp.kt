@@ -34,6 +34,8 @@ interface Actions {
     fun save()
     fun discard()
     fun done()
+    fun keepAuto()
+    fun discardAuto()
 }
 
 @Composable
@@ -49,7 +51,7 @@ fun ExerciseApp(screen: Screen, last: ActivityType?, a: Actions) {
                 Screen.List -> ActivityListScreen(last, a::pick) { a.go(Screen.More) }
                 Screen.More -> MoreScreen(a::pick)
                 is Screen.Countdown -> CountdownScreen(screen.type, onGo = { a.pick(screen.type) }, onCancel = { a.go(Screen.List) })
-                Screen.Live -> view?.let { LiveScreen(it, page) { p -> page = p } }
+                Screen.Live -> view?.let { LiveScreen(it, page, { p -> page = p }, a::keepAuto, a::discardAuto) }
                 Screen.Controls -> view?.let { ControlsScreen(it, a::toggle) { a.go(Screen.ConfirmEnd) } }
                 Screen.ConfirmEnd -> ConfirmEndScreen(onSave = a::save, onDiscard = { a.go(Screen.ConfirmDiscard) })
                 Screen.ConfirmDiscard -> ConfirmDiscardScreen(onKeep = { a.go(Screen.ConfirmEnd) }, onDiscard = a::discard)

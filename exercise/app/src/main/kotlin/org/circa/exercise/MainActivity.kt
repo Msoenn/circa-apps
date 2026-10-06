@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.circa.exercise.data.ExerciseService
+import org.circa.exercise.data.GpsState
 import org.circa.exercise.data.Haptics
 import org.circa.exercise.data.Live
 import org.circa.exercise.data.Notifs
@@ -100,6 +101,13 @@ class MainActivity : ComponentActivity(), Actions {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // An auto workout that started in the background could not take the location service type (and so no GPS):
+        // the app is visible now, which allows it. Re-promoting the service is harmless when GPS already works.
+        Live.view.value?.let { if (it.type.gps && it.gps == GpsState.SEARCHING) ExerciseService.send(this, ExerciseService.ACTION_RESTORE) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -176,6 +184,13 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun discard() {
         ExerciseService.send(this, ExerciseService.ACTION_DISCARD)
+        screen = Screen.List
+    }
+
+    override fun keepAuto() { ExerciseService.send(this, ExerciseService.ACTION_AUTO_KEEP) }
+
+    override fun discardAuto() {
+        ExerciseService.send(this, ExerciseService.ACTION_AUTO_DISCARD)
         screen = Screen.List
     }
 

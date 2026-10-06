@@ -31,6 +31,9 @@ data class LiveView(
     val gps: GpsState,
     /** Identifies the workout (its start time): the UI starts each new workout on the first page. */
     val startMs: Long = 0L,
+    /** An auto-detected walk/run, and whether it still waits for Keep / Discard. */
+    val auto: Boolean = false,
+    val autoPending: Boolean = false,
 ) {
     val hrScale: Float get() = Zones.scale(hr, maxHr)
 }
