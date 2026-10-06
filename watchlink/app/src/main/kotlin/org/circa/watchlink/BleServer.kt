@@ -180,6 +180,18 @@ class BleServer(private val ctx: Context, private val h: Handler, private val li
     }
 
     // ---- advertising ----
+    /** Builder.setOwnAddressType(ADDRESS_TYPE_PUBLIC = 0) is @SystemApi, so it is called reflectively. */
+    private fun setPublicOwnAddress(b: AdvertisingSetParameters.Builder) {
+        runCatching {
+            b.javaClass.getMethod("setOwnAddressType", Int::class.javaPrimitiveType).invoke(b, 0)
+        }.onFailure { Log.w(TAG, "advertising: setOwnAddressType(PUBLIC) unavailable: $it") }
+    }
+
+    /** ADDRESS_TYPE_PUBLIC exists from API 34 and needs the privileged BLUETOOTH_PRIVILEGED permission. */
+    private fun canUsePublicAddress(): Boolean =
+        android.os.Build.VERSION.SDK_INT >= 34 &&
+            ctx.checkSelfPermission("android.permission.BLUETOOTH_PRIVILEGED") == android.content.pm.PackageManager.PERMISSION_GRANTED
+
     fun startAdvertising() {
         if (!running || !serviceAdded || advertising || advStarting) return
         advertiser = adapter!!.bluetoothLeAdvertiser   // non-null: only reached from start()/its callbacks
@@ -188,10 +200,17 @@ class BleServer(private val ctx: Context, private val h: Handler, private val li
             state("no-advertiser")
             return
         }
+        // Advertise from the watch's public identity address, like a real Bangle.js's fixed address. The default
+        // (a rotating resolvable private address) made Gadgetbridge list the watch as a new device after every
+        // rotation. ADDRESS_TYPE_PUBLIC needs BLUETOOTH_PRIVILEGED (granted to the priv-app by device/circa); without
+        // it the stack falls back to the default, so this is safe on other images.
         val p = AdvertisingSetParameters.Builder()
             .setLegacyMode(true).setConnectable(true).setScannable(true)
             .setInterval(AdvertisingSetParameters.INTERVAL_MEDIUM)
-            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH).build()
+            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
+            .apply { if (canUsePublicAddress()) setPublicOwnAddress(this) }
+            .build()
+        Log.i(TAG, "advertising: own address " + (if (canUsePublicAddress()) "PUBLIC" else "default (rotating)"))
         val advData = AdvertiseData.Builder().setIncludeDeviceName(true).setIncludeTxPowerLevel(false).build()
         val scan = AdvertiseData.Builder().addServiceUuid(ParcelUuid(NUS)).build()
         advStarting = true
