@@ -44,8 +44,14 @@ class WatchLinkService : Service(), BleServer.Listener {
     private lateinit var ble: BleServer
     private lateinit var sensors: Sensors
     private lateinit var log: ActivityLog
+    private lateinit var sleep: SleepTracking
     private lateinit var nm: NotificationManager
     private val notifyPolicy = NotifyPolicy()
+    private val navAlert = NavAlert()
+
+    /** A route alert is a notification-grade buzz, not an alarm: the usage a notification's own vibration gets. */
+    private val navVibration: VibrationAttributes =
+        VibrationAttributes.Builder().setUsage(VibrationAttributes.USAGE_NOTIFICATION).build()
     private lateinit var power: PowerManager
     private lateinit var wake: PowerManager.WakeLock
     private lateinit var vib: Vibrator
@@ -289,6 +295,8 @@ class WatchLinkService : Service(), BleServer.Listener {
             },
         )
         sensors.startSteps()
+        sleep = SleepTracking(this, getSystemService(SensorManager::class.java), h, log, ::wakeAcquire, ::wakeRelease)
+        sleep.start()
         registerReceiver(batteryRx, IntentFilter(Intent.ACTION_BATTERY_CHANGED), null, h)
         val id = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         val current = try {
@@ -314,6 +322,9 @@ class WatchLinkService : Service(), BleServer.Listener {
             null,
             h
         )
+        // Flush the step state at power-off (the counter resets on the next boot). Dynamic registration: a
+        // manifest receiver would not get ACTION_SHUTDOWN anyway.
+        registerReceiver(shutdownRx, IntentFilter(Intent.ACTION_SHUTDOWN), null, h)
         updateLiveHr("service start")
         // activity bucket clock
         log.startBucket(sensors.stepTotal())
@@ -384,10 +395,12 @@ class WatchLinkService : Service(), BleServer.Listener {
                 endHrWindow("service stop")
                 stopFind()
                 if (::sensors.isInitialized) sensors.stopAll()
+                if (::sleep.isInitialized) sleep.stop()
                 ble.stop()
                 try { unregisterReceiver(batteryRx) } catch (ignored: Exception) {}
                 try { unregisterReceiver(btRx) } catch (ignored: Exception) {}
                 try { unregisterReceiver(screenRx) } catch (ignored: Exception) {}
+                try { unregisterReceiver(shutdownRx) } catch (ignored: Exception) {}
                 val am = getSystemService(AlarmManager::class.java)
                 bucketPi?.let { am.cancel(it) }
                 hrSamplePi?.let { am.cancel(it) }
@@ -515,6 +528,8 @@ class WatchLinkService : Service(), BleServer.Listener {
             "find" -> if (Proto.bool(m, "n", false)) startFind() else stopFind()
             // Phone data for the Circa apps (PhoneStore -> PhoneDataProvider). Same parser as the DEBUG_GB_LINE receiver.
             "weather", "musicinfo", "musicstate", "calendar", "calendar-" -> PhoneStore.onMessage(m)
+            // Navigation also buzzes the coming maneuver, which only the service can do (see onNav).
+            "nav" -> onNav(m)
             "force_calendar_sync_start" -> {
                 // GB asks which event ids the "watch" holds (sent on every setTime); answering with ours makes it
                 // delete what we dropped and resend what we lack (BJS handleCalendarSync).
@@ -594,6 +609,50 @@ class WatchLinkService : Service(), BleServer.Listener {
         }
     }
 
+    /**
+     * DEBUG_GB_LINE sleep_replay: run a synthetic night ([SleepReplay] spec, or "night") through a fresh
+     * [SleepTracker] with the live constants and log the `act` lines it would send as "OUT.debug ...". Nothing is
+     * stored or sent to GB, and the live tracker is not touched. The spec's HH:MM is the most recent such local time.
+     */
+    private fun debugSleepReplay(spec: String) {
+        val text = if (spec.trim() == "night") SleepReplay.NIGHT else spec
+        val now = log.now()
+        val tz = java.util.TimeZone.getDefault()
+        val recs = try {
+            SleepReplay.parse(text) { minute ->
+                val local = now + tz.getOffset(now)
+                val dayStart = local - Math.floorMod(local, 86_400_000L)
+                var t = dayStart + minute * 60_000L - tz.getOffset(now)
+                if (t > now) t -= 86_400_000L
+                t
+            }
+        } catch (e: Exception) {
+            Log.i(TAG, "sleep_replay: bad spec ($e)")
+            return
+        }
+        val t = SleepTracker { ms ->
+            val local = ms + tz.getOffset(ms)
+            (Math.floorMod(local, 86_400_000L) / 60_000L).toInt()
+        }
+        val resting = SleepModel.restingHr(recs.map { it.hr }.toIntArray())
+        val labels = java.util.TreeMap<Long, String>()
+        var maxHeld = 0
+        val emit: (Labelled) -> Unit = { x ->
+            x.kind?.let { if (SleepModel.isSleep(it)) labels[x.record.ts] = it }
+            Log.i(TAG, "OUT.debug " + JsonOut.encode(actRecord(x.record, x.kind)))
+        }
+        for (r in recs) {
+            t.offer(r, resting).forEach(emit)
+            maxHeld = Math.max(maxHeld, t.heldCount())
+        }
+        t.flush().forEach(emit)
+        val s = SleepModel.lastSession(labels)
+        Log.i(TAG, "sleep_replay: " + recs.size + " buckets, resting " + resting + " bpm, max held " + maxHeld
+                + ", " + labels.values.count { it == SleepModel.LIGHT } + " sleep / "
+                + labels.values.count { it == SleepModel.AWAKE } + " awake buckets"
+                + (if (s != null) ", last session " + s.startMs + ".." + s.endMs + " asleep " + s.asleepMin + " min" else ""))
+    }
+
     // ---- phone data (weather request, provider commands) ----
     /** Asks GB for the weather with the v2 forecast (what a Bangle's weather app does); repeats hourly while linked. */
     private fun requestWeather(l: BleServer.Link) {
@@ -646,6 +705,7 @@ class WatchLinkService : Service(), BleServer.Listener {
             val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
             val pct = if (level < 0 || scale <= 0) -1 else Math.round(level * 100f / scale)
             val chg = if (i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0) 1 else 0
+            if (::sleep.isInitialized && chg != batChg) sleep.setCharging(chg == 1)
             if (pct != batLevel || chg != batChg) {
                 val first = batLevel < 0
                 batLevel = pct
@@ -661,6 +721,13 @@ class WatchLinkService : Service(), BleServer.Listener {
     private val screenRx = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             updateLiveHr(if (i.action == Intent.ACTION_SCREEN_ON) "screen on" else "screen off")
+        }
+    }
+
+    /** Power-off: get the last step counter onto disk before the reboot resets it. */
+    private val shutdownRx = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            HealthStore.flushStepState()
         }
     }
 
@@ -809,6 +876,40 @@ class WatchLinkService : Service(), BleServer.Listener {
         wakeRelease(wakeFindToken)
         wakeFindToken = 0
         Log.i(TAG, "FIND stop")
+    }
+
+    /**
+     * One `nav` message (Google Maps through Gadgetbridge): store the state the provider serves, then buzz for the
+     * maneuver the route is on. The decision is pure ([NavAlert]); the vibration is here, and theater mode mutes it
+     * the way it mutes the notification channel's (no wakeup, the buzz is shorter than the notification pattern).
+     */
+    private fun onNav(m: Map<String, Any?>) {
+        PhoneStore.onMessage(m)
+        val nav = PhoneStore.nav()
+        if (nav == null) {
+            navAlert.onEnd()
+            Log.i(TAG, "NAV route ended (blank message)")
+            return
+        }
+        val kind = navAlert.onNav(nav.instruction, nav.action, nav.distanceM)
+        if (kind == NavAlert.Kind.NONE) return
+        if (theaterModeOn()) {
+            Log.i(TAG, "NAV $kind skipped (theater mode)")
+            return
+        }
+        when (kind) {
+            NavAlert.Kind.TURN -> vib.vibrate(
+                VibrationEffect.createWaveform(
+                    longArrayOf(0, NavAlert.TURN_ON_MS, NavAlert.TURN_GAP_MS, NavAlert.TURN_ON_MS), -1
+                ),
+                navVibration,
+            )
+            else -> vib.vibrate(
+                VibrationEffect.createOneShot(NavAlert.FINISH_MS, VibrationEffect.DEFAULT_AMPLITUDE),
+                navVibration,
+            )
+        }
+        Log.i(TAG, "NAV $kind buzz distance=" + nav.distanceM + "m action=" + (nav.action ?: "-"))
     }
 
     // ---- (c) realtime HR/steps ----
@@ -1005,25 +1106,52 @@ class WatchLinkService : Service(), BleServer.Listener {
         if (plan.sampleDue) startHrWindow(why, plan.batched())
         if (plan.bucketEndMs > SampleWake.NO_BUCKET) {
             ensureHealth(why + " alarm")
-            closeBucket(plan.bucketEndMs)
+            val end = plan.bucketEndMs
+            // Sleep tracking first collects the accelerometer batch (bounded wait, own wakelock with a hard timeout).
+            sleep.beforeClose { closeBucket(end) }
         }
         scheduleBucket()
         scheduleHrSample()
     }
 
-    /** Close the bucket ending at [end] and push it (spec §4.3) — under the caller's wake when there is one. */
+    /**
+     * Close the bucket ending at [end] and push what is final (spec §4.3) — under the caller's wake when there is one.
+     * Sleep tracking may hold the bucket back until its label is known and later release several at once
+     * (see [SleepTracking]); with tracking off every bucket goes out at once, unlabelled, as before.
+     */
     private fun closeBucket(end: Long) {
-        val r = log.closeBucket(end, sensors.stepTotal())
+        val endElapsed = SystemClock.elapsedRealtime() - (log.now() - end)
+        val r = log.closeBucket(end, sensors.stepTotal(), sleep.measure(endElapsed))
         Log.d(TAG, "BUCKET closed ts=" + r.ts + " steps=" + r.steps + " hr=" + r.hr + " (n=" + r.hrCount + ")"
+                + (if (r.measured()) " still=" + r.still + " restless=" + r.restless + " worn=" + r.worn else "")
                 + (if (log.synced()) "" else " [pending: time not synced]"))
-        if (log.synced() && ble.subscribedLinks().isNotEmpty()) {
-            val rec = actRecord(r)
-            // During a workout the sample carries GB's activity kind (RUNNING, WALKING, ...; GB >= 0.83 labels the
-            // minutes with it). Backfill (actfetch) can't know past workouts and stays unlabelled.
-            exercise.activeKind()?.let { rec["act"] = it }
-            sendAll(rec)    // spec §4.3 push, like BA-boot:32-36
-            sendAll(statusMsg())     // plus status at least every 10 min (spec §4.1)
+        if (!log.synced()) return
+        // During a workout the sample carries GB's activity kind (RUNNING, WALKING, ...; GB >= 0.83 labels the
+        // minutes with it). Backfill (actfetch) can't know past workouts and stays unlabelled.
+        val linked = ble.subscribedLinks().isNotEmpty()
+        val out = sleep.onBucket(r, if (linked) exercise.activeKind() else null)
+        if (sleep.heldCount() > 0 || out.size != 1) {
+            Log.d(TAG, "sleep: released " + out.size + " (" + out.joinToString(" ") { (it.kind ?: "-") } + "), held "
+                    + sleep.heldCount())
         }
+        if (linked) {
+            sendBacklog()
+            for (x in out) sendAll(actRecord(x.record, x.kind))    // spec §4.3 push, like BA-boot:32-36
+            sendAll(statusMsg())     // plus status at least every 10 min (spec §4.1)
+        } else {
+            sleep.markUndelivered(out)
+        }
+    }
+
+    /** Re-send buckets released while no GB link was up (GB's own actfetch cursor has already passed them). */
+    private fun sendBacklog() {
+        val from = sleep.undeliveredSince()
+        if (from <= 0L) return
+        val held = sleep.heldFrom()
+        val recs = log.since(from).filter { held == 0L || it.ts < held }
+        for (r in recs) sendAll(actRecord(r, sleep.label(r.ts)))
+        sleep.clearUndelivered()
+        Log.i(TAG, "sleep: sent backlog of " + recs.size + " buckets since " + from)
     }
 
     /**
@@ -1053,16 +1181,23 @@ class WatchLinkService : Service(), BleServer.Listener {
     private fun onHrSampleAlarm() = runScheduledWork("sample")
 
     private fun onActFetch(l: BleServer.Link, since: Long) {
-        val recs = log.since(since)
+        // Sleep tracking: start no later than the oldest bucket released while GB was away (GB's cursor has passed
+        // it), and leave out buckets still held back (they are sent once their label is final).
+        val und = sleep.undeliveredSince()
+        val from = if (und > 0L && since > 0L && und < since) und else since
+        val held = sleep.heldFrom()
+        val recs = log.since(from).filter { held == 0L || it.ts < held }
         val st = msg("actfetch")
         st["state"] = "start"
         send(l, st)
-        for (r in recs) send(l, actRecord(r))
+        for (r in recs) send(l, actRecord(r, sleep.label(r.ts)))
+        sleep.clearUndelivered()
         val end = msg("actfetch")
         end["state"] = "end"
         end["count"] = recs.size
         send(l, end)
-        Log.i(TAG, "ACTFETCH since=$since sent " + recs.size + " records"
+        Log.i(TAG, "ACTFETCH since=$since from=$from sent " + recs.size + " records"
+                + (if (held > 0L) " (" + sleep.heldCount() + " held for sleep labels)" else "")
                 + (if (log.pendingCount() > 0) " (" + log.pendingCount() + " unsynced buckets held back)" else ""))
     }
 
@@ -1129,6 +1264,27 @@ class WatchLinkService : Service(), BleServer.Listener {
             val s = instance ?: return false
             if (!s::h.isInitialized) return false
             s.h.post { s.debugTrackLine(m) }
+            return true
+        }
+
+        /** DEBUG_GB_LINE sleep_replay: replay a synthetic night on the service thread; false when not running. */
+        @JvmStatic
+        fun debugSleepReplay(spec: String): Boolean {
+            val s = instance ?: return false
+            if (!s::h.isInitialized) return false
+            s.h.post { s.debugSleepReplay(spec) }
+            return true
+        }
+
+        /**
+         * DEBUG_GB_LINE nav line: store the state and run the alert on the service thread (the vibration only
+         * exists there); false when not running, so the receiver falls back to storing the line itself.
+         */
+        @JvmStatic
+        fun debugNav(m: Map<String, Any?>): Boolean {
+            val s = instance ?: return false
+            if (!s::h.isInitialized) return false
+            s.h.post { s.onNav(m) }
             return true
         }
 
@@ -1215,11 +1371,13 @@ class WatchLinkService : Service(), BleServer.Listener {
             return m
         }
 
-        private fun actRecord(r: Buckets.Record): LinkedHashMap<String, Any?> {
+        /** One `act` sample; [kind] is GB's ActivityKind name (sleep or a workout), null = unlabelled. */
+        private fun actRecord(r: Buckets.Record, kind: String? = null): LinkedHashMap<String, Any?> {
             val m = msg("act")
             m["ts"] = r.ts
             m["stp"] = r.steps
             m["hrm"] = r.hr
+            if (kind != null) m["act"] = kind
             return m
         }
     }

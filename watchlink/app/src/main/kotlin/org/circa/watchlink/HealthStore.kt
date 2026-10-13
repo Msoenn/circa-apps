@@ -3,6 +3,7 @@ package org.circa.watchlink
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 
 /**
@@ -19,14 +20,22 @@ import android.util.Log
  * [NotifyThrottle.BACKGROUND_INTERVAL_MS] when it is off. Both the `latest` and `history` URIs are notified; a
  * subscriber registered on the authority is notified for either.
  *
- * The step baseline (local midnight + cumulative counter at that midnight) is persisted so a service restart
- * within the same day does not lose the count; the pure class re-snaps it on a day change or a counter reset.
+ * The step state (local midnight, cumulative counter at that midnight, last counter seen, boot count) is persisted
+ * so a service restart — or a reboot — within the same day does not lose the count; the pure class carries the
+ * day's steps over a reboot and re-snaps the baseline on a day change. The last counter is written at most once a
+ * minute or every [PERSIST_STEP_INTERVAL] steps, plus immediately on a day change / reboot rebase and on shutdown.
  */
 internal object HealthStore {
     private const val TAG = "WatchLink"
     const val PREFS = "health"
     const val KEY_DAY_START = "steps_day_start_ms"
     const val KEY_BASE_TOTAL = "steps_base_total"
+    const val KEY_LAST_TOTAL = "steps_last_total"
+    const val KEY_BOOT_COUNT = "steps_boot_count"
+
+    /** The last counter is persisted at most this often, or every [PERSIST_STEP_INTERVAL] steps, whichever first. */
+    private const val PERSIST_INTERVAL_MS = 60_000L
+    private const val PERSIST_STEP_INTERVAL = 50L
 
     /** Notification spacing: 3 s while the screen is interactive, 30 s when it is off ([NotifyThrottle]). */
     private val throttle = NotifyThrottle()
@@ -45,10 +54,14 @@ internal object HealthStore {
     private var lastNotifyElapsed = -NotifyThrottle.BACKGROUND_INTERVAL_MS
     private var savedDayStart = Long.MIN_VALUE
     private var savedBaseTotal = -1L
+    private var savedLastTotal = -1L
+    private var savedBootCount = -1
+    private var lastPersistElapsed = -PERSIST_INTERVAL_MS
+    private var persistAtSteps = -1L
 
     /**
      * Idempotent: the provider calls it to get a Context, the service also passes its clock. The persisted step
-     * baseline is loaded once.
+     * state is loaded once.
      */
     @Synchronized
     fun attach(c: Context, now: (() -> Long)? = null) {
@@ -61,11 +74,18 @@ internal object HealthStore {
             if (np.contains(KEY_BASE_TOTAL) && np.contains(KEY_DAY_START)) {
                 val day = np.getLong(KEY_DAY_START, Long.MIN_VALUE)
                 val base = np.getLong(KEY_BASE_TOTAL, -1L)
-                snapshot.restoreSteps(day, base)
+                // A preferences file written before the reboot carry-over has no last counter or boot count: treat
+                // them as unknown, which is exactly the old re-snap-on-reset behaviour.
+                val last = if (np.contains(KEY_LAST_TOTAL)) np.getLong(KEY_LAST_TOTAL, base) else base
+                val boot = if (np.contains(KEY_BOOT_COUNT)) np.getLong(KEY_BOOT_COUNT, -1L).toInt() else -1
+                snapshot.restoreSteps(day, base, last, boot)
                 savedDayStart = day
                 savedBaseTotal = base
+                savedLastTotal = last
+                savedBootCount = boot
+                persistAtSteps = last
                 // Debug, not INFO: the baseline is step-counter numbers (health numbers stay out of the default log).
-                Log.d(TAG, "health: step baseline restored (day=$day base=$base)")
+                Log.d(TAG, "health: step baseline restored (day=$day base=$base last=$last boot=$boot)")
             }
         }
     }
@@ -90,19 +110,50 @@ internal object HealthStore {
     /** One cumulative step-counter value; [tzOffsetMs] is the local UTC offset at [nowMs]. */
     fun onSteps(nowMs: Long, total: Long, tzOffsetMs: Int) {
         if (total < 0) return
-        snapshot.updateSteps(nowMs, total, tzOffsetMs)
-        persistStepBaseline()
+        snapshot.updateSteps(nowMs, total, tzOffsetMs, bootCount())
+        persistStepState()
         maybeNotify()
     }
 
-    private fun persistStepBaseline() {
+    /** Write the step state now (device shutting down: the counter resets on the next boot). */
+    @Synchronized
+    fun flushStepState() = persistStepState(force = true)
+
+    /** `Settings.Global.BOOT_COUNT`, or -1 when unknown: the caller side of the model's reboot detection. */
+    private fun bootCount(): Int {
+        val c = ctx ?: return -1
+        return try {
+            Settings.Global.getInt(c.contentResolver, Settings.Global.BOOT_COUNT, -1)
+        } catch (e: Exception) {
+            -1
+        }
+    }
+
+    /**
+     * Persist the step state (day, baseline, last counter, boot count). A day change or reboot rebase writes
+     * immediately; otherwise the last counter is written at most once a minute or every [PERSIST_STEP_INTERVAL]
+     * steps, since the counter ticks often and a write per event would be needless I/O.
+     */
+    private fun persistStepState(force: Boolean = false) {
         val p = prefs ?: return
         val day = snapshot.dayStartMs()
         val base = snapshot.baseTotal()
-        if (day == savedDayStart && base == savedBaseTotal) return   // only on a day change / counter reset
+        val last = snapshot.lastTotal()
+        if (last < 0) return                                   // nothing observed (or restored) yet
+        val boot = snapshot.bootCount()
+        val now = SystemClock.elapsedRealtime()
+        val rebased = day != savedDayStart || base != savedBaseTotal || boot != savedBootCount
+        val due = last - persistAtSteps >= PERSIST_STEP_INTERVAL || now - lastPersistElapsed >= PERSIST_INTERVAL_MS
+        if (!force && !rebased && (!due || last == savedLastTotal)) return
         savedDayStart = day
         savedBaseTotal = base
-        p.edit().putLong(KEY_DAY_START, day).putLong(KEY_BASE_TOTAL, base).apply()
+        savedLastTotal = last
+        savedBootCount = boot
+        persistAtSteps = last
+        lastPersistElapsed = now
+        val e = p.edit().putLong(KEY_DAY_START, day).putLong(KEY_BASE_TOTAL, base)
+            .putLong(KEY_LAST_TOTAL, last).putLong(KEY_BOOT_COUNT, boot.toLong())
+        if (force) e.commit() else e.apply()   // at shutdown the async write could be cut off
     }
 
     private fun maybeNotify() {

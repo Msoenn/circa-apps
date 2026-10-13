@@ -6,12 +6,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import org.circa.settings.model.Accent
 import org.circa.settings.model.LongPressAction
 import org.circa.settings.model.Profile
@@ -66,6 +68,10 @@ data class SettingsSnapshot(
     val longPress: LongPressAction = LongPressAction.DEFAULT,
     /** Settings.Secure circa_auto_detect: the Exercise app's walk/run auto-detection (default on). */
     val autoDetect: Boolean = true,
+    /** Settings.Secure circa_sleep_tracking: WatchLink's sleep tracking (default on). */
+    val sleepTracking: Boolean = true,
+    /** Settings.Global circa_usb_data: the USB/charging port's data signalling (default on). */
+    val usbData: Boolean = true,
 )
 
 /**
@@ -89,6 +95,8 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
 
         /** The launcher's face picker (handled by its MainActivity; settings/README.md). */
         const val ACTION_PICK_FACE = "org.circa.intent.action.PICK_FACE"
+
+        private const val TAG = "CircaSettings"
     }
 
     fun read(): SettingsSnapshot {
@@ -126,6 +134,10 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             profile = readProfile(),
             longPress = LongPressAction.fromRaw(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.LONG_PRESS))),
             autoDetect = ProfileModel.autoDetectOn(getRaw(SettingKey(SettingsTable.SECURE, ProfileKeys.AUTO_DETECT))),
+            sleepTracking = ProfileModel.sleepTrackingOn(
+                getRaw(SettingKey(SettingsTable.SECURE, ProfileKeys.SLEEP_TRACKING)),
+            ),
+            usbData = ProfileModel.usbDataOn(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.USB_DATA))),
         )
     }
 
@@ -211,6 +223,9 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
     fun setAutoDetect(on: Boolean): Boolean =
         runCatching { Settings.Secure.putInt(resolver, ProfileKeys.AUTO_DETECT, if (on) 1 else 0) }.getOrDefault(false)
 
+    fun setSleepTracking(on: Boolean): Boolean =
+        runCatching { Settings.Secure.putInt(resolver, ProfileKeys.SLEEP_TRACKING, if (on) 1 else 0) }.getOrDefault(false)
+
     fun setLongPress(action: LongPressAction): Boolean =
         runCatching { Settings.Global.putString(resolver, ProfileKeys.LONG_PRESS, action.value) }.getOrDefault(false)
 
@@ -241,6 +256,45 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             )
         }
         return wrote
+    }
+
+    /**
+     * The USB/charging port's data signalling (`circa_usb_data`, Settings.Global): the key is written
+     * first so the choice survives a reboot, then pushed to the port. Off means charging only - no
+     * data, no adb, no MTP.
+     */
+    fun setUsbData(on: Boolean): Boolean {
+        val wrote = runCatching {
+            Settings.Global.putInt(resolver, ProfileKeys.USB_DATA, if (on) 1 else 0)
+        }.getOrDefault(false)
+        enableUsbDataSignal(on)
+        return wrote
+    }
+
+    /**
+     * Re-applies the stored USB choice at boot ([UsbDataReceiver]): the USB HAL comes up with data
+     * signalling enabled on every boot, so a stored `circa_usb_data` 0 is pushed again. Unset or on
+     * means the platform default already matches the choice, and nothing is called.
+     */
+    fun applyUsbData(): Boolean =
+        if (ProfileModel.usbDataOn(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.USB_DATA)))) {
+            true
+        } else {
+            enableUsbDataSignal(false)
+        }
+
+    /**
+     * `UsbManager.enableUsbDataSignal` is @SystemApi (MANAGE_USB) and not in the public SDK the app
+     * compiles against, so it is called reflectively. A platform without it, a refused call or a
+     * missing service logs a warning and returns false; the port then keeps the platform default.
+     */
+    private fun enableUsbDataSignal(on: Boolean): Boolean {
+        val usb = context.getSystemService(UsbManager::class.java)
+        return runCatching {
+            UsbManager::class.java
+                .getMethod("enableUsbDataSignal", Boolean::class.javaPrimitiveType)
+                .invoke(usb, on) as Boolean
+        }.onFailure { Log.w(TAG, "enableUsbDataSignal($on)", it) }.getOrDefault(false)
     }
 
     // ---- Display --------------------------------------------------------------------------------

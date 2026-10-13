@@ -13,8 +13,10 @@ package org.circa.watchlink
  * - **History:** samples of the last [HISTORY_WINDOW_MS], oldest first, capped at [MAX_SAMPLES] (a realtime HR
  *   session at sensor rate would otherwise grow without bound).
  * - **Steps since local midnight:** the step counter is cumulative since boot, so "today" is
- *   `total - totalAtLocalMidnight`. The baseline is re-snapped when the local date changes or when the counter
- *   jumps backwards (reboot: the HAL restarts at 0), so a day boundary always starts at 0.
+ *   `total - totalAtLocalMidnight`. The baseline is re-snapped when the local date changes. A reboot — a
+ *   different boot count, or a counter that jumped backwards when the boot count is unknown — carries the steps
+ *   already walked today into the new counter's origin (the baseline goes negative), so the day total survives
+ *   the reset; a reboot that lands on a new local day starts from 0.
  */
 class HealthSnapshot(
     private val hrMaxAgeMs: Long = HR_MAX_AGE_MS,
@@ -28,7 +30,9 @@ class HealthSnapshot(
     private val samples = ArrayDeque<Sample>()      // oldest first; newest last
 
     private var dayStartMs = Long.MIN_VALUE         // local-midnight epoch ms of the day the baseline belongs to
-    private var baseTotal = -1L                     // cumulative step counter at that midnight (or at the reset)
+    private var baseTotal = -1L                     // cumulative counter at that midnight; negative after a same-day reboot
+    private var bootCount = -1                      // platform boot count the baseline belongs to; -1 = unknown
+    private var lastTotal = -1L                     // last observed cumulative counter; < 0 = nothing observed yet
     private var stepsToday: Long? = null
     private var stepsAtMs: Long? = null
 
@@ -67,22 +71,45 @@ class HealthSnapshot(
 
     /**
      * Feed the cumulative step counter. Returns steps since local midnight, or the last value if [total] is
-     * unknown (-1). [tzOffsetMs] is the local UTC offset at [nowMs].
+     * unknown (-1). [tzOffsetMs] is the local UTC offset at [nowMs]; [bootCount] is `Settings.Global.BOOT_COUNT`
+     * (-1 when unknown), read by the caller.
      */
     @Synchronized
-    fun updateSteps(nowMs: Long, total: Long, tzOffsetMs: Int): Long? {
+    fun updateSteps(nowMs: Long, total: Long, tzOffsetMs: Int, bootCount: Int): Long? {
         if (total < 0) return stepsToday
         val midnight = localMidnight(nowMs, tzOffsetMs)
-        if (baseTotal < 0 || dayStartMs != midnight || total < baseTotal) {
-            // First observation, a new local day, or the counter restarted (reboot): rebase at the current total.
-            dayStartMs = midnight
-            baseTotal = total
+        when {
+            lastTotal < 0 -> {
+                // First observation (nothing restored): today starts here.
+                dayStartMs = midnight
+                baseTotal = total
+            }
+            isReboot(total, bootCount) -> {
+                // A reboot reset the counter: carry today's steps into the new origin, or start a new day at 0.
+                val carried = if (dayStartMs == midnight) (lastTotal - baseTotal).coerceAtLeast(0L) else 0L
+                dayStartMs = midnight
+                baseTotal = -carried
+            }
+            dayStartMs != midnight -> {
+                // A new local day: everything counted since the last reading is the best estimate of today.
+                dayStartMs = midnight
+                baseTotal = total
+            }
         }
         val v = total - baseTotal
         stepsToday = if (v < 0) 0 else v
+        lastTotal = total
+        this.bootCount = bootCount
         stepsAtMs = nowMs
         return stepsToday
     }
+
+    /**
+     * A different boot count (when both are known) means the device rebooted; a counter below the last reading is
+     * the fallback for a reboot the boot count cannot report, and catches a counter reset within the same boot.
+     */
+    private fun isReboot(total: Long, bootCount: Int): Boolean =
+        total < lastTotal || (bootCount >= 0 && this.bootCount >= 0 && bootCount != this.bootCount)
 
     /** Steps since local midnight, or null if the step counter has not been observed. */
     @Synchronized
@@ -96,16 +123,29 @@ class HealthSnapshot(
     @Synchronized
     fun dayStartMs(): Long = dayStartMs
 
-    /** Cumulative step counter at that midnight (for persistence); -1 before the first update. */
+    /** Cumulative step counter at that midnight (for persistence); negative after a same-day reboot, -1 before it. */
     @Synchronized
     fun baseTotal(): Long = baseTotal
 
-    /** Restore a persisted baseline (process restart). An invalid pair is ignored; the next update re-snaps. */
+    /** Last observed cumulative counter (for persistence); -1 before the first update. */
     @Synchronized
-    fun restoreSteps(dayStartMs: Long, baseTotal: Long) {
-        if (baseTotal < 0 || dayStartMs == Long.MIN_VALUE) return
+    fun lastTotal(): Long = lastTotal
+
+    /** Boot count the baseline belongs to (for persistence); -1 when unknown. */
+    @Synchronized
+    fun bootCount(): Int = bootCount
+
+    /**
+     * Restore a persisted baseline (process restart): the local-midnight day, the baseline, the last counter seen
+     * and the boot count. An invalid record is ignored; the next update re-snaps.
+     */
+    @Synchronized
+    fun restoreSteps(dayStartMs: Long, baseTotal: Long, lastTotal: Long, bootCount: Int) {
+        if (dayStartMs == Long.MIN_VALUE || lastTotal < 0) return
         this.dayStartMs = dayStartMs
         this.baseTotal = baseTotal
+        this.lastTotal = lastTotal
+        this.bootCount = bootCount
         stepsToday = null    // recomputed on the next update
     }
 

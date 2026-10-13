@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
      * Demo/diagnostic values for the health complications, overriding WatchLink's provider while
      * active (the emulator has no heart-rate or step sensor):
      * `adb shell am broadcast -a org.circa.launcher.DEMO_HEALTH --ei hr 72 --ei steps 4213
-     * --es history 66,70,74,71,69,75,80,72`; `--ei hr -1 --ei steps -1` clears. Registered with the DUMP
+     * --es history 66,70,74,71,69,75,80,72 [--ei sleep_min 432]`; `--ei hr -1 --ei steps -1` clears. Registered with the DUMP
      * permission as the sender requirement, so only the shell / system can send it.
      */
     private val demoHealthReceiver = object : BroadcastReceiver() {
@@ -89,7 +89,8 @@ class MainActivity : ComponentActivity() {
             val steps = intent.getIntExtra("steps", -1).takeIf { it >= 0 }
             val history = intent.getStringExtra("history")
                 ?.split(',')?.mapNotNull { it.trim().toIntOrNull() }.orEmpty()
-            controller.setDemoHealth(hr, steps, history)
+            val sleepMin = intent.getIntExtra("sleep_min", -1).takeIf { it > 0 }
+            controller.setDemoHealth(hr, steps, history, sleepMin)
         }
     }
 

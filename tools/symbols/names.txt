@@ -20,11 +20,13 @@
 # Blank lines and # comments are ignored. Run:  tools/gen-symbols.py
 
 # --- launcher / settings / clock / companion ------------------------------------------------------------
+account_balance
 add
 accessibility_new
 alarm
 apps
 battery_android_full
+bedtime
 battery_saver
 bluetooth
 bluetooth_searching
@@ -32,6 +34,7 @@ brightness_auto
 brightness_medium  sysui
 call  watchlink
 cell_tower
+chat
 check
 close
 computer
@@ -39,12 +42,14 @@ delete
 directions_walk
 do_not_disturb_on
 edit
+event
 event_available
 favorite
 flag
 flight
 format_bold
 format_size
+forum
 headphones
 hourglass_top
 info
@@ -53,13 +58,18 @@ keyboard
 language
 link
 link_off
+local_shipping
 location_on
 lock
 lock_clock
+mail
 mobile_off
+music_note
+navigation
 notifications  watchlink
 palette
 pause
+photo_camera
 pin
 play_arrow
 power_settings_new
@@ -68,6 +78,7 @@ restart_alt
 schedule
 search  keyboard
 settings  sysui
+shopping_bag
 skip_next
 skip_previous
 smartphone
@@ -119,6 +130,33 @@ rainy
 sunny
 thunderstorm
 weather_snowy
+# companion Weather's "Today's details" rows
+air
+compress
+device_thermostat
+dew_point
+humidity_percentage
+nights_stay
+umbrella
+wb_sunny
+wb_twilight
+
+# --- navigation (launcher watch face while a route is active) ------------------------------------------
+straight
+turn_left
+turn_right
+turn_slight_left
+turn_slight_right
+turn_sharp_left
+turn_sharp_right
+fork_left
+fork_right
+u_turn_left
+u_turn_right
+roundabout_left
+roundabout_right
+wrong_location
+sports_score
 
 # --- SystemUI QS-tile pipeline drawables ----------------------------------------------------------------
 movie  sysui

@@ -46,6 +46,113 @@ class LogicTest {
         assertFalse(Wx.usesFahrenheit(null))
     }
 
+    @Test fun uvScale() {
+        assertNull(Wx.uvIndex(null))
+        assertEquals(3, Wx.uvIndex(3.4f))
+        assertEquals(4, Wx.uvIndex(3.5f))     // half rounds up, the safer band
+        assertEquals(0, Wx.uvIndex(0.4f))
+        assertEquals("Low", Wx.uvBand(0)); assertEquals("Low", Wx.uvBand(2))
+        assertEquals("Moderate", Wx.uvBand(3)); assertEquals("Moderate", Wx.uvBand(5))
+        assertEquals("High", Wx.uvBand(6)); assertEquals("High", Wx.uvBand(7))
+        assertEquals("Very high", Wx.uvBand(8)); assertEquals("Very high", Wx.uvBand(10))
+        assertEquals("Extreme", Wx.uvBand(11)); assertEquals("Extreme", Wx.uvBand(20))
+        assertEquals(0xFF4CAF50.toInt(), Wx.uvColorArgb(0))
+        assertEquals(0xFF4CAF50.toInt(), Wx.uvColorArgb(2))
+        assertEquals(0xFFFDD835.toInt(), Wx.uvColorArgb(3))
+        assertEquals(0xFFFB8C00.toInt(), Wx.uvColorArgb(6))
+        assertEquals(0xFFE53935.toInt(), Wx.uvColorArgb(8))
+        assertEquals(0xFFAB47BC.toInt(), Wx.uvColorArgb(11))
+        assertNull(Wx.uvBadge(null))
+        assertEquals("UV 3" to 0xFFFDD835.toInt(), Wx.uvBadge(3.4f))
+        assertEquals("UV 0" to 0xFF4CAF50.toInt(), Wx.uvBadge(0f))
+        assertEquals("3 · Moderate", Wx.uvDetail(3))
+        assertEquals("11 · Extreme", Wx.uvDetail(11))
+    }
+
+    @Test fun compassAndWind() {
+        assertNull(Wx.compass(null))
+        assertEquals("N", Wx.compass(0)); assertEquals("N", Wx.compass(22)); assertEquals("NE", Wx.compass(23))
+        assertEquals("NE", Wx.compass(45)); assertEquals("E", Wx.compass(90)); assertEquals("SE", Wx.compass(135))
+        assertEquals("S", Wx.compass(180)); assertEquals("SW", Wx.compass(225)); assertEquals("W", Wx.compass(270))
+        assertEquals("NW", Wx.compass(315)); assertEquals("N", Wx.compass(359)); assertEquals("N", Wx.compass(360))
+        assertEquals("N", Wx.compass(-1))
+        assertNull(Wx.wind(null, 270, false))
+        assertEquals("19 km/h NW", Wx.wind(19.3f, 315, false))
+        assertEquals("12 mph NW", Wx.wind(19.3f, 315, true))
+        assertEquals("19 km/h", Wx.wind(19.3f, null, false))
+    }
+
+    @Test fun detailUnits() {
+        assertNull(Wx.percent(null))
+        assertEquals("85%", Wx.percent(85))
+        assertEquals("0%", Wx.percent(0))
+        assertNull(Wx.pressure(null, false))
+        assertEquals("1012 hPa", Wx.pressure(1012f, false))
+        assertEquals("29.88 inHg", Wx.pressure(1012f, true))
+        assertNull(Wx.visibility(null, false))
+        assertEquals("16 km", Wx.visibility(16000f, false))
+        assertEquals("0.5 km", Wx.visibility(500f, false))
+        assertEquals("10 mi", Wx.visibility(16093.5f, true))
+        assertEquals("9.9 mi", Wx.visibility(15900f, true))
+        assertEquals("0.5 mi", Wx.visibility(800f, true))
+    }
+
+    @Test fun detailRows() {
+        val sun = ms(2026, 10, 5, 7, 12)
+        val set = ms(2026, 10, 5, 18, 40)
+        val all = DetailValues(
+            feelsC = 15, windKmh = 19.3f, windDir = 315, humidity = 72, rainPct = 80, uv = 3.4f,
+            sunriseMs = sun, sunsetMs = set, pressureHpa = 1012f, visibilityM = 16000f, dewC = 9, cloudPct = 90,
+        )
+        val rows = Details.rows(all, fahrenheit = false, zone = berlin, is24h = false, locale = us)
+        assertEquals(11, rows.size)
+        assertEquals(
+            listOf("Feels like", "Wind", "Humidity", "Chance of rain", "UV index", "Sunrise", "Sunset", "Pressure",
+                "Visibility", "Dew point", "Cloud cover"),
+            rows.map { it.label },
+        )
+        assertEquals(
+            listOf(DetailIcon.THERMOSTAT, DetailIcon.WIND, DetailIcon.HUMIDITY, DetailIcon.RAIN, DetailIcon.UV,
+                DetailIcon.SUNRISE, DetailIcon.SUNSET, DetailIcon.PRESSURE, DetailIcon.VISIBILITY, DetailIcon.DEW_POINT,
+                DetailIcon.CLOUD),
+            rows.map { it.icon },
+        )
+        assertEquals("15°", rows[0].value)
+        assertEquals("19 km/h NW", rows[1].value)
+        assertEquals("72%", rows[2].value)
+        assertEquals("80%", rows[3].value)
+        assertEquals("3 · Moderate", rows[4].value)
+        assertEquals(0xFFFDD835.toInt(), rows[4].valueArgb)
+        assertEquals("7:12 AM", rows[5].value)
+        assertEquals("6:40 PM", rows[6].value)
+        assertEquals("1012 hPa", rows[7].value)
+        assertEquals("16 km", rows[8].value)
+        assertEquals("9°", rows[9].value)
+        assertEquals("90%", rows[10].value)
+        assertTrue(rows.all { it.valueArgb == null || it.icon == DetailIcon.UV })
+        // the same values in °F with a 24 h clock
+        val imperial = Details.rows(all, fahrenheit = true, zone = berlin, is24h = true, locale = us)
+        assertEquals("59°", imperial[0].value)
+        assertEquals("12 mph NW", imperial[1].value)
+        assertEquals("07:12", imperial[5].value)
+        assertEquals("18:40", imperial[6].value)
+        assertEquals("29.88 inHg", imperial[7].value)
+        assertEquals("9.9 mi", imperial[8].value)
+        // unknown values have no row
+        val only = Details.rows(
+            DetailValues(null, null, null, 55, null, null, null, null, null, null, null, null),
+            fahrenheit = false, zone = berlin, is24h = true, locale = us,
+        )
+        assertEquals(listOf("Humidity"), only.map { it.label })
+        assertEquals(DetailIcon.HUMIDITY, only[0].icon)
+        assertTrue(
+            Details.rows(
+                DetailValues(null, null, null, null, null, null, null, null, null, null, null, null),
+                fahrenheit = false, zone = berlin, is24h = true, locale = us,
+            ).isEmpty(),
+        )
+    }
+
     @Test fun forecastParsing() {
         val json = """[{"day_ms":2000,"hi_c":20,"lo_c":10,"code":800,"rain_pct":5},{"day_ms":1000,"hi_c":22,"lo_c":11,"code":500},{"hi_c":1}]"""
         val f = Forecast.parse(json)
@@ -71,8 +178,8 @@ class LogicTest {
 
     @Test fun ageText() {
         val now = 10_000_000_000L
-        assertEquals("Just now", Fmt.age(now - 30_000, now))
-        assertEquals("Just now", Fmt.age(now + 5_000, now))
+        assertEquals("just now", Fmt.age(now - 30_000, now))
+        assertEquals("just now", Fmt.age(now + 5_000, now))
         assertEquals("1 min ago", Fmt.age(now - 60_000, now))
         assertEquals("59 min ago", Fmt.age(now - 59 * 60_000, now))
         assertEquals("1 h ago", Fmt.age(now - 60 * 60_000, now))

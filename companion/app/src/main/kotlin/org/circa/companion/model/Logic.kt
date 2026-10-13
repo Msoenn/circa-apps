@@ -51,6 +51,106 @@ object Wx {
     /** "21°" (the unit letter is left out like stock Wear); null -> "--". */
     fun temp(celsius: Int?, fahrenheit: Boolean): String =
         if (celsius == null) "--" else "${convert(celsius, fahrenheit)}°"
+
+    // ---- today's details ----
+
+    /** The UV index as a whole number (the WHO scale is reported in whole numbers); null when there is no reading. */
+    fun uvIndex(uv: Float?): Int? = uv?.let { Math.round(it) }
+
+    /** The WHO UV band: 0-2 Low, 3-5 Moderate, 6-7 High, 8-10 Very high, 11+ Extreme. */
+    fun uvBand(index: Int): String = when {
+        index <= 2 -> "Low"
+        index <= 5 -> "Moderate"
+        index <= 7 -> "High"
+        index <= 10 -> "Very high"
+        else -> "Extreme"
+    }
+
+    /** The WHO colour of a UV band, as ARGB. */
+    fun uvColorArgb(index: Int): Int = when {
+        index <= 2 -> 0xFF4CAF50.toInt()
+        index <= 5 -> 0xFFFDD835.toInt()
+        index <= 7 -> 0xFFFB8C00.toInt()
+        index <= 10 -> 0xFFE53935.toInt()
+        else -> 0xFFAB47BC.toInt()
+    }
+
+    /** The main screen's UV part ("UV 3") and the colour of its band; null when there is no reading. */
+    fun uvBadge(uv: Float?): Pair<String, Int>? = uvIndex(uv)?.let { "UV $it" to uvColorArgb(it) }
+
+    /** The details row's UV value: "3 · Moderate". */
+    fun uvDetail(index: Int): String = "$index · ${uvBand(index)}"
+
+    /** 8-point compass rose ("N", "NE", "E", …) for a wind direction in degrees; null without a direction. */
+    fun compass(deg: Int?): String? = deg?.let { POINTS[Math.floorMod(Math.round(it / 45f), POINTS.size)] }
+
+    /** "12 mph NW" (imperial) or "19 km/h NW"; the compass is left out when the direction is unknown. */
+    fun wind(kmh: Float?, dir: Int?, fahrenheit: Boolean): String? {
+        if (kmh == null) return null
+        val speed = if (fahrenheit) Math.round(kmh * MPH_PER_KMH) else Math.round(kmh)
+        val text = "$speed ${if (fahrenheit) "mph" else "km/h"}"
+        return compass(dir)?.let { "$text $it" } ?: text
+    }
+
+    /** "85%". */
+    fun percent(value: Int?): String? = value?.let { "$it%" }
+
+    /** "1012 hPa" or "29.88 inHg". */
+    fun pressure(hPa: Float?, fahrenheit: Boolean): String? = hPa?.let {
+        if (fahrenheit) "%.2f inHg".format(Locale.US, it * INHG_PER_HPA) else "${Math.round(it)} hPa"
+    }
+
+    /** "16 km" or "10 mi"; a value under 10 keeps one decimal, so 500 m is "0.5 km", not "0 km". */
+    fun visibility(meters: Float?, fahrenheit: Boolean): String? = meters?.let {
+        val v = if (fahrenheit) it / METERS_PER_MILE else it / 1000f
+        val text = if (v < 10f) "%.1f".format(Locale.US, v) else Math.round(v).toString()
+        "$text ${if (fahrenheit) "mi" else "km"}"
+    }
+
+    private val POINTS = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    private const val MPH_PER_KMH = 0.6213712f
+    private const val INHG_PER_HPA = 0.029529983f
+    private const val METERS_PER_MILE = 1609.344f
+}
+
+/** One row of the Weather app's "Today's details" page. */
+enum class DetailIcon { THERMOSTAT, WIND, HUMIDITY, RAIN, UV, SUNRISE, SUNSET, PRESSURE, VISIBILITY, DEW_POINT, CLOUD }
+
+/** What one row of that page draws: [icon], the dim [label] above the [value], and the value's optional ARGB colour. */
+data class DetailRow(val icon: DetailIcon, val label: String, val value: String, val valueArgb: Int? = null)
+
+/** The nullable `/weather` columns the details page can show (null = Gadgetbridge has no value for it). */
+data class DetailValues(
+    val feelsC: Int?, val windKmh: Float?, val windDir: Int?, val humidity: Int?, val rainPct: Int?, val uv: Float?,
+    val sunriseMs: Long?, val sunsetMs: Long?, val pressureHpa: Float?, val visibilityM: Float?, val dewC: Int?,
+    val cloudPct: Int?,
+)
+
+object Details {
+    /**
+     * The rows to show, in order, skipping every value that is unknown (Feels like, Wind, Humidity, Chance of rain,
+     * UV index, Sunrise, Sunset, Pressure, Visibility, Dew point, Cloud cover). Distances and the pressure follow the
+     * same °C/°F choice as the temperature; the times follow the watch's 12/24 h setting.
+     */
+    fun rows(
+        v: DetailValues, fahrenheit: Boolean, zone: ZoneId, is24h: Boolean, locale: Locale = Locale.getDefault(),
+    ): List<DetailRow> {
+        val rows = ArrayList<DetailRow>(11)
+        v.feelsC?.let { rows += DetailRow(DetailIcon.THERMOSTAT, "Feels like", Wx.temp(it, fahrenheit)) }
+        Wx.wind(v.windKmh, v.windDir, fahrenheit)?.let { rows += DetailRow(DetailIcon.WIND, "Wind", it) }
+        Wx.percent(v.humidity)?.let { rows += DetailRow(DetailIcon.HUMIDITY, "Humidity", it) }
+        Wx.percent(v.rainPct)?.let { rows += DetailRow(DetailIcon.RAIN, "Chance of rain", it) }
+        Wx.uvIndex(v.uv)?.let {
+            rows += DetailRow(DetailIcon.UV, "UV index", Wx.uvDetail(it), Wx.uvColorArgb(it))
+        }
+        v.sunriseMs?.let { rows += DetailRow(DetailIcon.SUNRISE, "Sunrise", Fmt.clock(it, zone, is24h, locale)) }
+        v.sunsetMs?.let { rows += DetailRow(DetailIcon.SUNSET, "Sunset", Fmt.clock(it, zone, is24h, locale)) }
+        Wx.pressure(v.pressureHpa, fahrenheit)?.let { rows += DetailRow(DetailIcon.PRESSURE, "Pressure", it) }
+        Wx.visibility(v.visibilityM, fahrenheit)?.let { rows += DetailRow(DetailIcon.VISIBILITY, "Visibility", it) }
+        v.dewC?.let { rows += DetailRow(DetailIcon.DEW_POINT, "Dew point", Wx.temp(it, fahrenheit)) }
+        Wx.percent(v.cloudPct)?.let { rows += DetailRow(DetailIcon.CLOUD, "Cloud cover", it) }
+        return rows
+    }
 }
 
 data class ForecastDay(val dayMs: Long, val hiC: Int, val loC: Int, val code: Int, val rainPct: Int?)
@@ -100,11 +200,11 @@ object Forecast {
 // ---- time / staleness ------------------------------------------------------------------------------------
 
 object Fmt {
-    /** "Just now", "5 min ago", "3 h ago", "2 d ago". A time in the future counts as just now. */
+    /** "just now", "5 min ago", "3 h ago", "2 d ago". A time in the future counts as just now. */
     fun age(thenMs: Long, nowMs: Long): String {
         val min = (nowMs - thenMs) / 60_000
         return when {
-            min < 1 -> "Just now"
+            min < 1 -> "just now"
             min < 60 -> "$min min ago"
             min < 24 * 60 -> "${min / 60} h ago"
             else -> "${min / (24 * 60)} d ago"

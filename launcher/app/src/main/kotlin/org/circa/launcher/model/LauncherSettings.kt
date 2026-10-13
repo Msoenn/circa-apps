@@ -39,13 +39,16 @@ class LauncherSettings(private val store: KeyValueStore) {
             val day = store.getLong(KEY_STEP_DAY) ?: return null
             val baseline = store.getLong(KEY_STEP_BASELINE) ?: return null
             val last = store.getLong(KEY_STEP_LAST) ?: return null
-            return StepState(day, baseline, last)
+            // A preferences file written before the reboot carry-over has no boot count: unknown (-1).
+            val bootCount = store.getLong(KEY_STEP_BOOT_COUNT) ?: -1L
+            return StepState(day, baseline, last, bootCount.toInt())
         }
         set(value) {
             if (value == null) return
             store.putLong(KEY_STEP_DAY, value.epochDay)
             store.putLong(KEY_STEP_BASELINE, value.baseline)
             store.putLong(KEY_STEP_LAST, value.last)
+            store.putLong(KEY_STEP_BOOT_COUNT, value.bootCount.toLong())
         }
 
     private companion object {
@@ -55,5 +58,6 @@ class LauncherSettings(private val store: KeyValueStore) {
         const val KEY_STEP_DAY = "step_day"
         const val KEY_STEP_BASELINE = "step_baseline"
         const val KEY_STEP_LAST = "step_last"
+        const val KEY_STEP_BOOT_COUNT = "step_boot_count"
     }
 }

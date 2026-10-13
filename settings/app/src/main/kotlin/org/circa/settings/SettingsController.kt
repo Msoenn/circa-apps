@@ -104,4 +104,6 @@ class SettingsController(context: Context, private val finish: () -> Unit) {
     fun setSex(sex: Sex?) = change { setSex(sex) }
     fun setLongPress(action: LongPressAction) = change { setLongPress(action) }
     fun setAutoDetect(on: Boolean) = change { setAutoDetect(on) }
+    fun setSleepTracking(on: Boolean) = change { setSleepTracking(on) }
+    fun setUsbData(on: Boolean) = change { setUsbData(on) }
 }

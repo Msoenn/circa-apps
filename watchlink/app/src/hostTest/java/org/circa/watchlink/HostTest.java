@@ -428,23 +428,43 @@ public final class HostTest {
 
         HealthSnapshot st = new HealthSnapshot();
         check(st.stepsToday() == null && st.stepsTimeMs() == null, "health: no step value before an observation");
-        check(st.updateSteps(0, -1, 0) == null, "health: unknown step counter (-1) yields null");
+        check(st.updateSteps(0, -1, 0, -1) == null, "health: unknown step counter (-1) yields null");
         long t2350 = DAY - 10 * MIN, t2352 = DAY - 8 * MIN, t0005 = DAY + 5 * MIN, t0010 = DAY + 10 * MIN;
-        check(st.updateSteps(t2350, 1000, 0) == 0L, "health: first observation of the day is 0");
-        check(st.updateSteps(t2352, 1200, 0) == 200L, "health: steps accumulate within the day");
-        check(st.updateSteps(t0005, 1210, 0) == 0L, "health: a new local day rebases steps to 0");
-        check(st.updateSteps(t0010, 1250, 0) == 40L, "health: steps accumulate in the new day");
+        check(st.updateSteps(t2350, 1000, 0, -1) == 0L, "health: first observation of the day is 0");
+        check(st.updateSteps(t2352, 1200, 0, -1) == 200L, "health: steps accumulate within the day");
+        check(st.updateSteps(t0005, 1210, 0, -1) == 0L, "health: a new local day rebases steps to 0");
+        check(st.updateSteps(t0010, 1250, 0, -1) == 40L, "health: steps accumulate in the new day");
         check(st.stepsTimeMs() == t0010, "health: steps timestamp is the last observation");
 
+        // A reboot carries today's steps over the counter reset (same local day); the boot count is the signal.
+        HealthSnapshot carry = new HealthSnapshot();
+        check(carry.updateSteps(0, 0, 0, 5) == 0L, "health: steps start at 0");
+        check(carry.updateSteps(MIN, 3000, 0, 5) == 3000L, "health: 3,000 steps walked before the reboot");
+        check(carry.updateSteps(2 * MIN, 120, 0, 6) == 3120L, "health: a same-day reboot carries today's steps over");
+        check(carry.updateSteps(3 * MIN, 200, 0, 6) == 3200L, "health: the carried baseline keeps counting");
+
+        // The boot count detects a reboot whose counter is already above the last reading.
+        HealthSnapshot bc = new HealthSnapshot();
+        bc.updateSteps(0, 5000, 0, 5);
+        check(bc.updateSteps(MIN, 5100, 0, 5) == 100L, "health: 100 steps so far before the reboot");
+        check(bc.updateSteps(2 * MIN, 5200, 0, 6) == 5300L, "health: the boot count detects a reboot the counter hides");
+        check(bc.updateSteps(3 * MIN, 5290, 0, 6) == 5390L, "health: the carried baseline keeps counting");
+
+        // A reboot on a new local day starts from 0: only the steps since boot count.
+        HealthSnapshot nd = new HealthSnapshot();
+        nd.updateSteps(t2350, 5000, 0, 5);
+        check(nd.updateSteps(t0005, 60, 0, 6) == 60L, "health: a reboot on a new day counts only since boot");
+
+        // Fallback when the boot count is unknown (-1): a counter that went backwards is the reboot signal.
         HealthSnapshot rb = new HealthSnapshot();
-        rb.updateSteps(0, 5000, 0);
-        check(rb.updateSteps(MIN, 30, 0) == 0L, "health: a counter reset (reboot) rebases to 0");
-        check(rb.updateSteps(2 * MIN, 55, 0) == 25L, "health: counts from the reset value");
+        rb.updateSteps(0, 5000, 0, -1);
+        check(rb.updateSteps(MIN, 30, 0, -1) == 30L, "health: a dropped counter rebases the day (nothing to carry)");
+        check(rb.updateSteps(2 * MIN, 55, 0, -1) == 55L, "health: counts everything since the reset");
 
         HealthSnapshot rs = new HealthSnapshot();
-        rs.restoreSteps(0L, 800L);
+        rs.restoreSteps(0L, 800L, 800L, -1);
         check(rs.stepsToday() == null, "health: a restored baseline has no value until the next update");
-        check(rs.updateSteps(3 * MIN, 950L, 0) == 150L, "health: a restored baseline survives a restart");
+        check(rs.updateSteps(3 * MIN, 950L, 0, -1) == 150L, "health: a restored baseline survives a restart");
 
         // 6e. 5-minute HR sample schedule + live-HR (screen/theater) policy + provider notify throttle
         HrSampleSchedule sched = new HrSampleSchedule();
@@ -504,12 +524,17 @@ public final class HostTest {
 
         // 6g. Phone data (weather / music / calendar for the Circa apps) + provider caller policy
         PhoneDataTest.run();
+        // 6g2. Navigation: the nav state, Maps' distance strings and the turn-alert decision
+        NavTest.run();
         TrackSyncTest.run();
         BleNameTest.run();
         NotifIconTest.run();
 
         // 6h. System time zone from the phone's UTC offset (GB setTime / E.setTimeZone)
         TzPolicyTest.run();
+
+        // 6i. Sleep tracking: movement measures, classifier, hold-back state machine on synthetic nights
+        SleepTest.run();
 
         // 7. Fuzz: random values as GB encoded them, random chunking
         int fuzz = 0;

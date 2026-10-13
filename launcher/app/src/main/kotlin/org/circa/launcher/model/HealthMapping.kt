@@ -47,5 +47,26 @@ object HealthMapping {
      */
     fun preferredSteps(watchLink: Int?, sensor: Int?): Int? = watchLink ?: sensor
 
+    /**
+     * One `/sleep` row (start, end, minutes asleep), null where a column was missing. A row that does not describe
+     * a real session (no minutes, end not after start) is dropped.
+     */
+    fun sleep(startMs: Long?, endMs: Long?, minutes: Int?): SleepSummary? {
+        if (startMs == null || endMs == null || minutes == null) return null
+        if (minutes <= 0 || endMs <= startMs) return null
+        return SleepSummary(startMs, endMs, minutes)
+    }
+
+    /** "7 h 12 min", "8 h", "45 min": the time asleep as the health tile shows it. */
+    fun sleepDuration(minutes: Int): String {
+        val h = minutes / 60
+        val m = minutes % 60
+        return when {
+            h == 0 -> "$m min"
+            m == 0 -> "$h h"
+            else -> "$h h $m min"
+        }
+    }
+
     private fun Long.toStepsInt(): Int = coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 }

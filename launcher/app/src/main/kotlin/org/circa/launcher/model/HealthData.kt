@@ -3,6 +3,9 @@ package org.circa.launcher.model
 /** One heart-rate sample from WatchLink's `/history` (WatchLink's clock; see the provider doc). */
 data class HrSample(val timeMs: Long, val bpm: Int)
 
+/** WatchLink's last sleep session (`/sleep`): [minutes] asleep between [startMs] and [endMs] (WatchLink's clock). */
+data class SleepSummary(val startMs: Long, val endMs: Long, val minutes: Int)
+
 /**
  * What the launcher knows about the wearer's health, read from WatchLink's ContentProvider
  * (`org.circa.watchlink.health`, see watchlink/DATA-CONTRACT.md):
@@ -13,13 +16,16 @@ data class HrSample(val timeMs: Long, val bpm: Int)
  *    other samples);
  *  - [stepsToday] is steps since local midnight, null until WatchLink has observed the step counter
  *    (a hard 0 would otherwise hide the launcher's own `TYPE_STEP_COUNTER` fallback);
- *  - [history] is the last 60 minutes of heart-rate samples, oldest first, for the tile's sparkline.
+ *  - [history] is the last 60 minutes of heart-rate samples, oldest first, for the tile's sparkline;
+ *  - [lastSleep] is the last night (or nap) WatchLink detected, null when none ended in the last 18 hours,
+ *    sleep tracking is off, or WatchLink predates it.
  */
 data class HealthData(
     val hrBpm: Int?,
     val hrTimeMs: Long?,
     val stepsToday: Int?,
     val history: List<HrSample>,
+    val lastSleep: SleepSummary? = null,
 ) {
     companion object {
         /** Nothing known yet, or WatchLink absent/empty: the UI's no-data state. */

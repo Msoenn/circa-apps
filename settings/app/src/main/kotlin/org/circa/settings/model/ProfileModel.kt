@@ -4,9 +4,10 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * The user profile the Exercise app reads (calories, heart-rate zones) and the side-button long-press choice,
- * shared through Settings (settings/README.md). Pure: parsing, labels, value ranges and
- * stepping are unit tested in `ProfileModelTest`; `data/SystemSettings` reads and writes the keys.
+ * The user profile the Exercise app reads (calories, heart-rate zones), the side-button long-press
+ * choice and the USB port's data signalling, shared through Settings (settings/README.md). Pure:
+ * parsing, labels, value ranges and stepping are unit tested in `ProfileModelTest`;
+ * `data/SystemSettings` reads and writes the keys.
  *
  * Gadgetbridge does not send a user profile to a Bangle.js, so everything here is entered on the watch.
  */
@@ -28,6 +29,15 @@ object ProfileKeys {
 
  /** Settings.Secure, int: 0 = off, anything else or absent = on (default). The Exercise app auto-detects walks and runs. */
     const val AUTO_DETECT = "circa_auto_detect"
+
+    /** Settings.Secure, int: 0 = off, anything else or absent = on (default). WatchLink detects sleep for Gadgetbridge. */
+    const val SLEEP_TRACKING = "circa_sleep_tracking"
+
+    /**
+     * Settings.Global, int: 0 = off, anything else or absent = on (default). Off = the USB/charging
+     * port carries no data at all (no adb, no MTP), and the choice is pushed to the USB HAL again at boot.
+     */
+    const val USB_DATA = "circa_usb_data"
 
     /** Settings.Global, "list" | "last" | "power"; absent = "list". Read by the framework and the Exercise app. */
     const val LONG_PRESS = "circa_exercise_long_press"
@@ -90,6 +100,12 @@ enum class ProfileField(
 object ProfileModel {
     /** `circa_auto_detect`: only an explicit 0 turns the Exercise app's walk/run auto-detection off. */
     fun autoDetectOn(raw: String?): Boolean = raw?.trim() != "0"
+
+    /** `circa_sleep_tracking`: only an explicit 0 turns WatchLink's sleep tracking off. */
+    fun sleepTrackingOn(raw: String?): Boolean = raw?.trim() != "0"
+
+    /** `circa_usb_data`: only an explicit 0 turns the USB port's data signalling off (charging only). */
+    fun usbDataOn(raw: String?): Boolean = raw?.trim() != "0"
 
     /** Youngest allowed age for the birth-year picker. */
     private const val MIN_AGE = 5

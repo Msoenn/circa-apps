@@ -52,6 +52,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -73,6 +74,9 @@ import org.circa.launcher.model.ExerciseGlyph
 import org.circa.launcher.model.ExerciseIndicator
 import org.circa.launcher.model.FaceStyle
 import org.circa.launcher.model.Gauge
+import org.circa.launcher.model.NavGlyph
+import org.circa.launcher.model.NavModel
+import org.circa.launcher.model.NavView
 import org.circa.launcher.model.PhoneComplications
 import org.circa.launcher.model.WeatherView
 import org.circa.launcher.model.Density as DensityUtil
@@ -86,6 +90,9 @@ const val FACE_CONCENTRIC_TAG = "face_concentric"
 const val FACE_ANALOG_TAG = "face_analog"
 const val WEATHER_COMPLICATION_TAG = "cplx_weather"
 const val EVENT_COMPLICATION_TAG = "cplx_event"
+
+/** The navigation view that replaces the face while a route is active. */
+const val NAV_FACE_TAG = "face_nav"
 
 /** The face's running-workout indicator; exposed to uiautomator as `resource-id`. */
 const val EXERCISE_INDICATOR_TAG = "exercise_indicator"
@@ -106,6 +113,8 @@ data class FaceData(
     /** Phone-fed complications (null = no data, so the slot is not drawn at all). */
     val weather: WeatherView? = null,
     val event: EventView? = null,
+    /** The route Maps is on (WatchLink's /nav): while it is set it replaces the face's own content. */
+    val nav: NavView? = null,
     /** The running workout's activity id (the exercise app's state provider); null = no indicator. */
     val activity: String? = null,
     /** Taps open Circa Companion; null in the face picker's previews. */
@@ -132,6 +141,7 @@ fun rememberFaceData(controller: LauncherController): FaceData {
         heartRate = controller.health.value.hrBpm,
         weather = PhoneComplications.weather(controller.phoneWeather.value, nowMs, fahrenheit),
         event = PhoneComplications.nextEvent(controller.phoneEvents.value, nowMs, ZoneId.systemDefault(), is24Hour),
+        nav = NavModel.view(controller.phoneNav.value),
         activity = controller.exerciseActivity.value,
         onWeatherTap = { controller.openCompanion("WeatherActivity") },
         onEventTap = { controller.openCompanion("AgendaActivity") },
@@ -162,7 +172,10 @@ fun WatchFaceScreen(controller: LauncherController) {
                 detectTapGestures(onLongPress = { controller.openFacePicker() })
             },
     ) {
-        WatchFace(controller.face.value, data)
+        // A route takes over the face: the maneuver Maps is on is what the wearer needs at a glance. The gestures
+        // (and the long press above) stay as they are.
+        val nav = data.nav
+        if (nav != null) NavigationFace(data, nav) else WatchFace(controller.face.value, data)
     }
 }
 
@@ -188,6 +201,95 @@ private fun indicatorTop(style: FaceStyle): Dp = when (style) {
     FaceStyle.DIGITAL -> 2.dp
     FaceStyle.CONCENTRIC -> 49.dp
     FaceStyle.ANALOG -> 26.dp
+}
+
+// ---- navigation: what Maps is on, in place of the face ------------------------------------------
+
+/** Width the instruction wraps inside: the circle is at its narrowest where the last line sits. */
+private val NAV_TEXT_WIDTH = 150.dp
+
+/**
+ * The navigation view, drawn instead of the face while a route is active (WatchLink's /nav): the current time, the
+ * maneuver's glyph in the accent, how far the turn is, what to do (two lines), and when Maps expects to arrive.
+ * Sized so the whole stack fits the round screen with the instruction on two lines: the bottom padding is larger than
+ * the top because the circle is too narrow near its bottom edge for the arrival line; a shorter stack stays centred.
+ */
+@Composable
+private fun NavigationFace(d: FaceData, nav: NavView) {
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 8.dp, bottom = 30.dp)
+            .testTag(NAV_FACE_TAG),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = ComplicationFormat.formatShortTime(d.now.toLocalTime(), d.is24Hour),
+            color = dim,
+            fontSize = 12.sp,
+            style = tightStyle(12f),
+            maxLines = 1,
+        )
+        Icon(
+            imageVector = nav.glyph.icon(),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(54.dp),
+        )
+        if (nav.distance.isNotEmpty()) {
+            Text(
+                text = nav.distance,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 30.sp,
+                style = tightStyle(30f, FontWeight.Bold),
+                maxLines = 1,
+            )
+        }
+        nav.instruction?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 15.sp,
+                style = TextStyle(lineHeight = 18.sp),
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp).widthIn(max = NAV_TEXT_WIDTH),
+            )
+        }
+        nav.etaText?.let {
+            Text(
+                text = it,
+                color = dim,
+                fontSize = 12.sp,
+                style = tightStyle(12f),
+                maxLines = 1,
+                modifier = Modifier.padding(top = 5.dp),
+            )
+        }
+    }
+}
+
+/** The Material Symbols glyph the navigation view draws for [this] maneuver (model/NavModel.kt). */
+private fun NavGlyph.icon(): ImageVector = when (this) {
+    NavGlyph.STRAIGHT -> CircaSymbols.Filled.Straight
+    NavGlyph.TURN_LEFT -> CircaSymbols.Filled.TurnLeft
+    NavGlyph.TURN_RIGHT -> CircaSymbols.Filled.TurnRight
+    NavGlyph.SLIGHT_LEFT -> CircaSymbols.Filled.TurnSlightLeft
+    NavGlyph.SLIGHT_RIGHT -> CircaSymbols.Filled.TurnSlightRight
+    NavGlyph.SHARP_LEFT -> CircaSymbols.Filled.TurnSharpLeft
+    NavGlyph.SHARP_RIGHT -> CircaSymbols.Filled.TurnSharpRight
+    NavGlyph.FORK_LEFT -> CircaSymbols.Filled.ForkLeft
+    NavGlyph.FORK_RIGHT -> CircaSymbols.Filled.ForkRight
+    NavGlyph.U_TURN_LEFT -> CircaSymbols.Filled.UTurnLeft
+    NavGlyph.U_TURN_RIGHT -> CircaSymbols.Filled.UTurnRight
+    NavGlyph.ROUNDABOUT_LEFT -> CircaSymbols.Filled.RoundaboutLeft
+    NavGlyph.ROUNDABOUT_RIGHT -> CircaSymbols.Filled.RoundaboutRight
+    NavGlyph.WRONG_LOCATION -> CircaSymbols.Filled.WrongLocation
+    NavGlyph.FINISH -> CircaSymbols.Filled.SportsScore
+    NavGlyph.NAVIGATION -> CircaSymbols.Outlined.Navigation
 }
 
 /**

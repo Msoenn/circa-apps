@@ -26,8 +26,10 @@ import org.circa.launcher.model.FaceStyle
 import org.circa.launcher.model.HealthData
 import org.circa.launcher.model.HealthMapping
 import org.circa.launcher.model.HrSample
+import org.circa.launcher.model.SleepSummary
 import org.circa.launcher.model.LauncherSettings
 import org.circa.launcher.model.MusicState
+import org.circa.launcher.model.NavState
 import org.circa.launcher.model.StepCounterModel
 import org.circa.launcher.model.WeatherReading
 import org.circa.launcher.model.NotificationItem
@@ -125,12 +127,13 @@ class LauncherController(private val context: Context) {
     /** The running workout's activity id (null = nothing recording), for the face's indicator. */
     val exerciseActivity: State<String?> get() = exerciseState.activity
 
-    /** WatchLink's phone data (weather, calendar, music, status) for the complications and tiles. */
+    /** WatchLink's phone data (weather, calendar, music, status, navigation) for the complications, face and tiles. */
     private val phoneData = PhoneDataRepository(context)
     val phoneWeather: State<WeatherReading?> get() = phoneData.weather
     val phoneEvents: State<List<CalendarEvent>> get() = phoneData.events
     val phoneMusic: State<MusicState?> get() = phoneData.music
     val phoneConnected: State<Boolean?> get() = phoneData.connected
+    val phoneNav: State<NavState?> get() = phoneData.nav
 
     /** A media transport button (`playpause` / `next` / `previous`), sent to the phone through WatchLink. */
     fun musicCommand(command: String) = phoneData.sendMusicCommand(command)
@@ -155,6 +158,7 @@ class LauncherController(private val context: Context) {
             stepsToday = demo?.stepsToday
                 ?: HealthMapping.preferredSteps(watchLink.stepsToday, sensorSteps.value),
             history = demo?.history?.takeIf { it.isNotEmpty() } ?: watchLink.history,
+            lastSleep = demo?.lastSleep ?: watchLink.lastSleep,
         )
     }
 
@@ -226,9 +230,17 @@ class LauncherController(private val context: Context) {
             settings.stepState,
             counter,
             LocalDate.now().toEpochDay(),
+            bootCount(),
         )
         settings.stepState = reading.state
         sensorSteps.value = reading.steps
+    }
+
+    /** `Settings.Global.BOOT_COUNT`, or -1 when the setting is unreadable/absent. */
+    private fun bootCount(): Int = try {
+        Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
+    } catch (e: Exception) {
+        -1
     }
 
     /** Start reading WatchLink; the activity calls this from `onStart`. */
@@ -279,12 +291,12 @@ class LauncherController(private val context: Context) {
     /**
      * Demo/diagnostic hook behind the DUMP-protected `DEMO_HEALTH` broadcast (see MainActivity). While
      * active these values override WatchLink's, so a screenshot can show data on an emulator with no
-     * health sensors. Sending `--ei hr -1 --ei steps -1` (no history) clears the override and lets the
-     * repository show through again.
+     * health sensors. `--ei sleep_min N` adds a last-night sleep line. Sending `--ei hr -1 --ei steps -1`
+     * (no history, no sleep) clears the override and lets the repository show through again.
      */
-    fun setDemoHealth(heartRate: Int?, steps: Int?, history: List<Int>) {
+    fun setDemoHealth(heartRate: Int?, steps: Int?, history: List<Int>, sleepMinutes: Int? = null) {
         demoHealth.value =
-            if (heartRate == null && steps == null && history.isEmpty()) {
+            if (heartRate == null && steps == null && history.isEmpty() && sleepMinutes == null) {
                 null
             } else {
                 HealthData(
@@ -293,6 +305,7 @@ class LauncherController(private val context: Context) {
                     stepsToday = steps,
                     // The demo hook carries no timestamps; the tile's sparkline draws bpm only.
                     history = history.map { HrSample(timeMs = 0L, bpm = it) },
+                    lastSleep = sleepMinutes?.let { SleepSummary(startMs = 0L, endMs = it * 60_000L, minutes = it) },
                 )
             }
     }

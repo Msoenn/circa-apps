@@ -55,6 +55,7 @@ import org.circa.launcher.model.AgendaTileItem
 import org.circa.launcher.model.AppEntry
 import org.circa.launcher.model.ComplicationFormat
 import org.circa.launcher.model.HealthData
+import org.circa.launcher.model.HealthMapping
 import org.circa.launcher.model.MediaModel
 import org.circa.launcher.model.MediaView
 import org.circa.launcher.model.Shortcuts
@@ -67,6 +68,7 @@ import kotlinx.coroutines.delay
 const val HEALTH_TILE_TAG = "tile_health"
 const val SHORTCUTS_TILE_TAG = "tile_shortcuts"
 const val HEALTH_EMPTY_TAG = "tile_health_empty"
+const val HEALTH_SLEEP_TAG = "tile_health_sleep"
 const val MEDIA_TILE_TAG = "tile_media"
 const val MEDIA_TITLE_TAG = "media_title"
 const val MEDIA_STATE_TAG = "media_state"
@@ -91,6 +93,7 @@ fun HealthTile(controller: LauncherController) {
     val hr = health.hrBpm
     val history = health.history.map { it.bpm }
     val steps = health.stepsToday
+    val sleep = health.lastSleep
     val accent = MaterialTheme.colorScheme.primary
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -101,7 +104,8 @@ fun HealthTile(controller: LauncherController) {
             .testTag(HEALTH_TILE_TAG),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(30.dp))
+        // With a sleep line the tile moves up a little so the extra row stays inside the circle's bottom chord.
+        Spacer(Modifier.height(if (sleep != null) 20.dp else 30.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.alpha(if (hr != null) 1f else NO_DATA_ALPHA),
@@ -141,7 +145,7 @@ fun HealthTile(controller: LauncherController) {
             }
         }
         SparklineChart(history, modifier = Modifier.size(width = 112.dp, height = 28.dp))
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(if (sleep != null) 8.dp else 14.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.alpha(if (steps != null) 1f else NO_DATA_ALPHA),
@@ -158,6 +162,23 @@ fun HealthTile(controller: LauncherController) {
                 Text(" steps", color = dim, fontSize = 13.sp, maxLines = 1)
             } else {
                 Text("No steps yet", color = dim, fontSize = 16.sp, maxLines = 1)
+            }
+        }
+        // Last night's sleep from WatchLink, only while a session ended in the last 18 hours.
+        if (sleep != null) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.testTag(HEALTH_SLEEP_TAG),
+            ) {
+                Icon(CircaSymbols.Filled.Bedtime, contentDescription = null, tint = dim, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(5.dp))
+                Text(
+                    text = HealthMapping.sleepDuration(sleep.minutes),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                )
             }
         }
     }

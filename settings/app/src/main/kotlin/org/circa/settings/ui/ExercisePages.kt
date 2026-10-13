@@ -72,6 +72,10 @@ internal fun ProfilePage(c: SettingsController) = ListPage(c, SettingsPage.PROFI
         "auto_detect", spec, "Auto detect workouts", c.settingsState.value.autoDetect,
         CircaSymbols.Outlined.DirectionsRun, secondary = onOff(c.settingsState.value.autoDetect),
     ) { c.setAutoDetect(it) }
+    toggleRow(
+        "sleep_tracking", spec, "Sleep tracking", c.settingsState.value.sleepTracking,
+        CircaSymbols.Outlined.Bedtime, secondary = onOff(c.settingsState.value.sleepTracking),
+    ) { c.setSleepTracking(it) }
     noteItem("profile_note", "Exercise uses these for calories and heart-rate zones")
 }
 

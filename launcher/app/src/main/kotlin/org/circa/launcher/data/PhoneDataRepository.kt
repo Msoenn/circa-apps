@@ -12,6 +12,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import org.circa.launcher.model.CalendarEvent
 import org.circa.launcher.model.MusicState
+import org.circa.launcher.model.NavState
 import org.circa.launcher.model.WeatherReading
 
 /**
@@ -25,15 +26,17 @@ object PhoneDataContract {
     val CALENDAR: Uri = Uri.withAppendedPath(BASE, "calendar")
     val MUSIC: Uri = Uri.withAppendedPath(BASE, "music")
     val STATUS: Uri = Uri.withAppendedPath(BASE, "status")
+    val NAV: Uri = Uri.withAppendedPath(BASE, "nav")
 }
 
 /**
- * Feeds the face's weather and next-event complications and the media/agenda tiles. Event driven: one
- * [ContentObserver] on the provider (WatchLink calls `notifyChange` on every write, coalesced to 300 ms), one read
- * at [start]. No timer. Staleness and "is this event over yet" are decided at draw time from the clock, not here.
+ * Feeds the face's weather and next-event complications, its navigation view, and the media/agenda tiles. Event
+ * driven: one [ContentObserver] on the provider (WatchLink calls `notifyChange` on every write, coalesced to
+ * 300 ms), one read at [start]. No timer. Staleness and "is this event over yet" are decided at draw time from the
+ * clock, not here; a route WatchLink has gone quiet on is dropped by the provider itself.
  *
  * Never throws: WatchLink missing, a SecurityException or a malformed cursor leave the state empty, so the
- * complications hide and the tiles fall back to their empty states.
+ * complications hide, the face draws normally and the tiles fall back to their empty states.
  */
 class PhoneDataRepository(private val context: Context) {
     private val resolver: ContentResolver = context.contentResolver
@@ -44,6 +47,7 @@ class PhoneDataRepository(private val context: Context) {
     private val _events: MutableState<List<CalendarEvent>> = mutableStateOf(emptyList())
     private val _music: MutableState<MusicState?> = mutableStateOf(null)
     private val _connected: MutableState<Boolean?> = mutableStateOf(null)
+    private val _nav: MutableState<NavState?> = mutableStateOf(null)
 
     val weather: State<WeatherReading?> get() = _weather
     val events: State<List<CalendarEvent>> get() = _events
@@ -51,6 +55,9 @@ class PhoneDataRepository(private val context: Context) {
 
     /** `/status` `connected`: true/false from WatchLink, null while the provider cannot be read. */
     val connected: State<Boolean?> get() = _connected
+
+    /** The active route, null when there is none. */
+    val nav: State<NavState?> get() = _nav
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
@@ -60,6 +67,7 @@ class PhoneDataRepository(private val context: Context) {
                 "calendar" -> readCalendar()
                 "music" -> readMusic()
                 "status" -> readStatus()
+                "nav" -> readNav()
                 else -> refresh() // unknown: cheap enough to re-read everything
             }
         }
@@ -83,6 +91,7 @@ class PhoneDataRepository(private val context: Context) {
         readCalendar()
         readMusic()
         readStatus()
+        readNav()
     }
 
     /**
@@ -184,6 +193,33 @@ class PhoneDataRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.d(TAG, "phone data: /status not readable: $e")
+            null
+        }
+    }
+
+    /** One row while a route is active, none when there is (WatchLink decides that, stale routes included). */
+    private fun readNav() {
+        _nav.value = try {
+            resolver.query(
+                PhoneDataContract.NAV,
+                arrayOf("updated_ms", "instruction", "distance", "distance_m", "action", "eta"),
+                null, null, null,
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    NavState(
+                        updatedMs = if (c.isNull(0)) 0L else c.getLong(0),
+                        instruction = c.getString(1),
+                        distance = c.getString(2).orEmpty(),
+                        distanceM = if (c.isNull(3)) -1L else c.getLong(3),
+                        action = c.getString(4),
+                        eta = c.getString(5),
+                    )
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "phone data: /nav not readable: $e")
             null
         }
     }

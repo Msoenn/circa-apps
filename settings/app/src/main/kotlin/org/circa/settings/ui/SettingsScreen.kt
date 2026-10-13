@@ -371,6 +371,12 @@ private fun ConnectivityPage(c: SettingsController) = ListPage(c, SettingsPage.C
     toggleRow("airplane", spec, "Airplane mode", s.airplane, CircaSymbols.Outlined.Flight, secondary = onOff(s.airplane)) {
         c.setAirplane(it)
     }
+    // Off = the port only charges (no data, no adb, no MTP); the choice is written to
+    // Settings.Global circa_usb_data and re-applied at boot (UsbDataReceiver).
+    toggleRow(
+        "usb_data", spec, "USB data", s.usbData, CircaSymbols.Outlined.Computer,
+        secondary = if (s.usbData) "Computer connections allowed" else "Charging only",
+    ) { c.setUsbData(it) }
 }
 
 @Composable

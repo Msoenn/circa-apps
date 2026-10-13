@@ -73,6 +73,26 @@ class ProfileModelTest {
     }
 
     @Test
+    fun sleepTrackingDefaultsToOn() {
+        assertEquals("circa_sleep_tracking", ProfileKeys.SLEEP_TRACKING)
+        assertEquals(true, ProfileModel.sleepTrackingOn(null))
+        assertEquals(true, ProfileModel.sleepTrackingOn("1"))
+        assertEquals(true, ProfileModel.sleepTrackingOn("garbage"))
+        assertEquals(false, ProfileModel.sleepTrackingOn("0"))
+        assertEquals(false, ProfileModel.sleepTrackingOn(" 0 "))
+    }
+
+    @Test
+    fun usbDataDefaultsToOn() {
+        assertEquals("circa_usb_data", ProfileKeys.USB_DATA)
+        assertEquals(true, ProfileModel.usbDataOn(null))
+        assertEquals(true, ProfileModel.usbDataOn("1"))
+        assertEquals(true, ProfileModel.usbDataOn("garbage"))
+        assertEquals(false, ProfileModel.usbDataOn("0"))
+        assertEquals(false, ProfileModel.usbDataOn(" 0 "))
+    }
+
+    @Test
     fun pagesHangUnderMain() {
         assertEquals(SettingsPage.MAIN, SettingsPage.PROFILE.parent)
         assertEquals(SettingsPage.PROFILE_MAX_HR, SettingsPage.PROFILE_MAX_HR_VALUE.parent)

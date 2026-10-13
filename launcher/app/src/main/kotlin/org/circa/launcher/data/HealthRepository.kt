@@ -15,6 +15,7 @@ import org.circa.launcher.model.HealthData
 import org.circa.launcher.model.HealthMapping
 import org.circa.launcher.model.HealthMapping.LatestRow
 import org.circa.launcher.model.HrSample
+import org.circa.launcher.model.SleepSummary
 
 /**
  * The contract of WatchLink's read-only health provider; the full specification is
@@ -26,6 +27,7 @@ object HealthContract {
     val URI: Uri = Uri.parse("content://$AUTHORITY")
     val LATEST: Uri = Uri.withAppendedPath(URI, "latest")
     val HISTORY: Uri = Uri.withAppendedPath(URI, "history")
+    val SLEEP: Uri = Uri.withAppendedPath(URI, "sleep")
 
     const val COL_HR_BPM = "hr_bpm"
     const val COL_HR_TIME = "hr_time_ms"
@@ -33,6 +35,9 @@ object HealthContract {
     const val COL_STEPS_TIME = "steps_time_ms"
     const val COL_TIME_MS = "time_ms"
     const val COL_BPM = "bpm"
+    const val COL_SLEEP_START = "sleep_start_ms"
+    const val COL_SLEEP_END = "sleep_end_ms"
+    const val COL_SLEEP_MINUTES = "sleep_minutes"
 }
 
 /**
@@ -94,7 +99,7 @@ class HealthRepository(private val context: Context) {
     /** Read `/latest` and `/history` and publish the model. Never throws. */
     fun refresh() {
         val data = HealthMapping.latest(readLatest())
-            .copy(history = HealthMapping.history(readHistory()))
+            .copy(history = HealthMapping.history(readHistory()), lastSleep = readSleep())
         _state.value = data
         if (started) {
             handler.removeCallbacks(reread)
@@ -138,6 +143,16 @@ class HealthRepository(private val context: Context) {
         emptyList()
     }
 
+    /** `/sleep`: one row while a session ended in the last 18 hours; an older WatchLink rejects the URI (null). */
+    private fun readSleep(): SleepSummary? = try {
+        resolver.query(HealthContract.SLEEP, SLEEP_PROJECTION, null, null, null)?.use { c ->
+            if (c.moveToFirst()) HealthMapping.sleep(c.longOrNull(0), c.longOrNull(1), c.intOrNull(2)) else null
+        }
+    } catch (e: Exception) {
+        Log.d(TAG, "health: /sleep not readable: $e")
+        null
+    }
+
     private fun Cursor.intOrNull(column: Int): Int? = if (isNull(column)) null else getInt(column)
 
     private fun Cursor.longOrNull(column: Int): Long? = if (isNull(column)) null else getLong(column)
@@ -151,6 +166,11 @@ class HealthRepository(private val context: Context) {
             HealthContract.COL_STEPS_TIME,
         )
         private val HISTORY_PROJECTION = arrayOf(HealthContract.COL_TIME_MS, HealthContract.COL_BPM)
+        private val SLEEP_PROJECTION = arrayOf(
+            HealthContract.COL_SLEEP_START,
+            HealthContract.COL_SLEEP_END,
+            HealthContract.COL_SLEEP_MINUTES,
+        )
         private const val REREAD_INTERVAL_MS = 60_000L
     }
 }

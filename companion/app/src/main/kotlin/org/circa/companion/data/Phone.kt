@@ -22,7 +22,9 @@ data class PhoneStatus(val connected: Boolean, val lastSeenMs: Long)
 
 data class WeatherNow(
     val updatedMs: Long, val location: String?, val tempC: Int?, val hiC: Int?, val loC: Int?, val code: Int?,
-    val text: String?, val humidity: Int?, val windKmh: Float?, val rainPct: Int?, val forecastJson: String?,
+    val text: String?, val humidity: Int?, val windKmh: Float?, val windDir: Int?, val uv: Float?, val rainPct: Int?,
+    val feelsC: Int?, val dewC: Int?, val pressureHpa: Float?, val cloudPct: Int?, val visibilityM: Float?,
+    val sunriseMs: Long?, val sunsetMs: Long?, val forecastJson: String?,
 )
 
 data class MusicNow(
@@ -63,7 +65,9 @@ object Phone {
         cr.query(uri("weather"), null, null, null, null).use { c ->
             if (c == null || !c.moveToFirst()) null else WeatherNow(
                 c.lng("updated_ms") ?: 0L, c.str("location"), c.int("temp_c"), c.int("hi_c"), c.int("lo_c"), c.int("code"),
-                c.str("text"), c.int("humidity"), c.flt("wind_kmh"), c.int("rain_pct"), c.str("forecast_json"),
+                c.str("text"), c.int("humidity"), c.flt("wind_kmh"), c.int("wind_dir"), c.flt("uv"), c.int("rain_pct"),
+                c.int("feels_c"), c.int("dew_c"), c.flt("pressure_hpa"), c.int("cloud_pct"), c.flt("visibility_m"),
+                c.lng("sunrise_ms"), c.lng("sunset_ms"), c.str("forecast_json"),
             )
         }
 

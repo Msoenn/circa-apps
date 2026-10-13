@@ -74,6 +74,26 @@ class HealthProvider : ContentProvider() {
                 }
                 m
             }
+            PATH_SLEEP -> {
+                // The last sleep session (SleepTracking), one row while it ended within SESSION_FRESH_MS, else none.
+                val cols = projection?.toList() ?: DEFAULT_SLEEP_COLUMNS
+                val c = context
+                val s = if (c == null) null else SleepTracking.lastSession(c)
+                val m = MatrixCursor(cols.toTypedArray(), 1)
+                if (s != null && s.asleepMin > 0 && now - s.endMs in 0..SleepTracking.SESSION_FRESH_MS) {
+                    m.addRow(
+                        cols.map<String, Any?> { col ->
+                            when (col) {
+                                COL_SLEEP_START_MS -> s.startMs
+                                COL_SLEEP_END_MS -> s.endMs
+                                COL_SLEEP_MINUTES -> s.asleepMin
+                                else -> null
+                            }
+                        }.toTypedArray()
+                    )
+                }
+                m
+            }
             else -> {
                 Log.i(TAG, "health provider: unknown uri $uri")
                 throw IllegalArgumentException("unknown health uri: $uri")
@@ -84,6 +104,7 @@ class HealthProvider : ContentProvider() {
     override fun getType(uri: Uri): String? = when (uri.lastPathSegment) {
         PATH_LATEST -> "vnd.android.cursor.item/vnd.org.circa.watchlink.health.latest"
         PATH_HISTORY -> "vnd.android.cursor.dir/vnd.org.circa.watchlink.health.history"
+        PATH_SLEEP -> "vnd.android.cursor.item/vnd.org.circa.watchlink.health.sleep"
         else -> null
     }
 
@@ -125,9 +146,11 @@ class HealthProvider : ContentProvider() {
         const val AUTHORITY = "org.circa.watchlink.health"
         const val PATH_LATEST = "latest"
         const val PATH_HISTORY = "history"
+        const val PATH_SLEEP = "sleep"
 
         @JvmField val URI_LATEST: Uri = Uri.parse("content://$AUTHORITY/$PATH_LATEST")
         @JvmField val URI_HISTORY: Uri = Uri.parse("content://$AUTHORITY/$PATH_HISTORY")
+        @JvmField val URI_SLEEP: Uri = Uri.parse("content://$AUTHORITY/$PATH_SLEEP")
 
         const val COL_HR_BPM = "hr_bpm"
         const val COL_HR_TIME_MS = "hr_time_ms"
@@ -135,10 +158,14 @@ class HealthProvider : ContentProvider() {
         const val COL_STEPS_TIME_MS = "steps_time_ms"
         const val COL_TIME_MS = "time_ms"
         const val COL_BPM = "bpm"
+        const val COL_SLEEP_START_MS = "sleep_start_ms"
+        const val COL_SLEEP_END_MS = "sleep_end_ms"
+        const val COL_SLEEP_MINUTES = "sleep_minutes"
 
         @JvmField val DEFAULT_LATEST_COLUMNS =
             listOf(COL_HR_BPM, COL_HR_TIME_MS, COL_STEPS_TODAY, COL_STEPS_TIME_MS)
         @JvmField val DEFAULT_HISTORY_COLUMNS = listOf(COL_TIME_MS, COL_BPM)
+        @JvmField val DEFAULT_SLEEP_COLUMNS = listOf(COL_SLEEP_START_MS, COL_SLEEP_END_MS, COL_SLEEP_MINUTES)
 
         private const val PACKAGE_LAUNCHER = "org.circa.launcher"
         private const val TAG = "WatchLink"

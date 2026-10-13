@@ -8,10 +8,10 @@ import android.util.Log
 import java.util.TimeZone
 
 /**
- * Process-wide holder of [PhoneData] (weather, music, calendar) plus the link status, shared by the service (feeds it
- * from GB lines), the debug receiver (same entry point, [onLine]) and [PhoneDataProvider] (reads it). Persists to
- * SharedPreferences (debounced, because a calendar sync is one message per event) and calls `notifyChange` per changed
- * path (debounced 300 ms for the same reason).
+ * Process-wide holder of [PhoneData] (weather, music, calendar, navigation) plus the link status, shared by the
+ * service (feeds it from GB lines), the debug receiver (same entry point, [onLine]) and [PhoneDataProvider] (reads
+ * it). Persists to SharedPreferences (debounced, because a calendar sync is one message per event) and calls
+ * `notifyChange` per changed path (debounced 300 ms for the same reason). The navigation state is live-only.
  */
 internal object PhoneStore {
     private const val TAG = "WatchLink"
@@ -43,9 +43,10 @@ internal object PhoneStore {
         if (bits and PhoneData.CH_WEATHER != 0) c.contentResolver.notifyChange(uri("weather"), null)
         if (bits and PhoneData.CH_MUSIC != 0) c.contentResolver.notifyChange(uri("music"), null)
         if (bits and PhoneData.CH_CALENDAR != 0) c.contentResolver.notifyChange(uri("calendar"), null)
+        if (bits and PhoneData.CH_NAV != 0) c.contentResolver.notifyChange(uri("nav"), null)
         if (bits and BIT_STATUS != 0) c.contentResolver.notifyChange(uri("status"), null)
     }
-    private const val BIT_STATUS = 8
+    private const val BIT_STATUS = 16
 
     @Synchronized
     fun attach(c: Context, now: (() -> Long)? = null) {
@@ -115,6 +116,10 @@ internal object PhoneStore {
     @Synchronized fun status(): Pair<Boolean, Long> = Pair(connected, lastSeenMs)
     @Synchronized fun weather(): PhoneData.Weather? = data.weather
     @Synchronized fun music(): PhoneData.Music? = data.music
+
+    /** The active route, already dropped when it is stale (see [PhoneData.navState]). */
+    @Synchronized fun nav(): PhoneData.Nav? = data.navState(clock())
+
     @Synchronized fun calendar(): List<PhoneData.Event> = data.calendar(clock())
 
     private fun scheduleNotify() {

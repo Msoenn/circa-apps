@@ -12,7 +12,7 @@ import android.os.Process
 import android.util.Log
 
 /**
- * Phone data for the Circa apps (weather, media, agenda, find phone): `content://org.circa.watchlink.data/…`.
+ * Phone data for the Circa apps (weather, media, agenda, navigation, find phone): `content://org.circa.watchlink.data/…`.
  * Contract: watchlink/DATA-CONTRACT.md. Reads and `call()` commands are limited by [CallerPolicy]
  * (system `org.circa.*` packages and the launcher); everything else, including the adb shell, gets a SecurityException.
  * Observers are notified by [PhoneStore] on every change.
@@ -41,7 +41,8 @@ class PhoneDataProvider : ContentProvider() {
                 cols = projection?.toList() ?: WEATHER_COLS
                 PhoneStore.weather()?.let { w ->
                     rows.add(listOf(w.updatedMs, w.location, w.tempC, w.hiC, w.loC, w.code, w.text, w.humidity, w.windKmh,
-                        w.windDir, w.uv, w.rainPct, w.forecastJson))
+                        w.windDir, w.uv, w.rainPct, w.feelsC, w.dewC, w.pressureHpa, w.cloudPct, w.visibilityM,
+                        w.sunriseMs, w.sunsetMs, w.forecastJson))
                 }
             }
             "music" -> {
@@ -56,12 +57,19 @@ class PhoneDataProvider : ContentProvider() {
                     rows.add(listOf(e.id, e.title, e.startMs, e.endMs, if (e.allDay) 1 else 0, e.location, e.calendar, e.color))
                 }
             }
+            "nav" -> {
+                cols = projection?.toList() ?: NAV_COLS
+                PhoneStore.nav()?.let { n ->
+                    rows.add(listOf(n.updatedMs, n.instruction, n.distance, n.distanceM, n.action, n.eta))
+                }
+            }
             else -> throw IllegalArgumentException("unknown watchlink data uri: $uri")
         }
         val all = when (path) {
             "status" -> STATUS_COLS
             "weather" -> WEATHER_COLS
             "music" -> MUSIC_COLS
+            "nav" -> NAV_COLS
             else -> CALENDAR_COLS
         }
         val c = MatrixCursor(cols.toTypedArray(), rows.size)
@@ -97,7 +105,7 @@ class PhoneDataProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String? = when (uri.pathSegments.firstOrNull()) {
-        "status", "weather", "music" -> "vnd.android.cursor.item/vnd.org.circa.watchlink.data.${uri.pathSegments[0]}"
+        "status", "weather", "music", "nav" -> "vnd.android.cursor.item/vnd.org.circa.watchlink.data.${uri.pathSegments[0]}"
         "calendar" -> "vnd.android.cursor.dir/vnd.org.circa.watchlink.data.calendar"
         else -> null
     }
@@ -128,8 +136,10 @@ class PhoneDataProvider : ContentProvider() {
         private val MUSIC_ARGS = setOf("play", "pause", "playpause", "next", "previous", "volumeup", "volumedown")
         private val STATUS_COLS = listOf("connected", "last_seen_ms")
         private val WEATHER_COLS = listOf("updated_ms", "location", "temp_c", "hi_c", "lo_c", "code", "text", "humidity",
-            "wind_kmh", "wind_dir", "uv", "rain_pct", "forecast_json")
+            "wind_kmh", "wind_dir", "uv", "rain_pct", "feels_c", "dew_c", "pressure_hpa", "cloud_pct", "visibility_m",
+            "sunrise_ms", "sunset_ms", "forecast_json")
         private val MUSIC_COLS = listOf("updated_ms", "state", "artist", "album", "track", "duration_s", "position_s", "position_at_ms")
+        private val NAV_COLS = listOf("updated_ms", "instruction", "distance", "distance_m", "action", "eta")
         private val CALENDAR_COLS = listOf("id", "title", "start_ms", "end_ms", "all_day", "location", "calendar", "color")
     }
 }

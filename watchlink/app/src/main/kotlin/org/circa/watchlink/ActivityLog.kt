@@ -117,13 +117,17 @@ internal class ActivityLog(private val ctx: Context) {
 
     fun openHr(): Int = if (hrCount == 0L) 0 else Math.round(hrSum.toDouble() / hrCount).toInt()
 
-    /** Close the open bucket at grid time `end`; returns the record (stored, or pending if unsynced). */
-    fun closeBucket(end: Long, stepTotal: Long): Buckets.Record {
+    /**
+     * Close the open bucket at grid time `end`; returns the record (stored, or pending if unsynced). [motion] carries
+     * the sleep-tracking measures (still / restless / worn), null when sleep tracking is not measuring.
+     */
+    fun closeBucket(end: Long, stepTotal: Long, motion: IntArray? = null): Buckets.Record {
         var steps = openSteps(stepTotal)
         if (bucketStepBase < 0 && stepTotal >= 0) steps = 0
         val hr = openHr()
         val n = hrCount.toInt()
-        val r = Buckets.Record(end, steps, hr, n)
+        val r = if (motion == null) Buckets.Record(end, steps, hr, n)
+        else Buckets.Record(end, steps, hr, n, motion[0], motion[1], motion[2])
         lastClosedEnd = end
         if (synced()) {
             store(r)
@@ -161,7 +165,7 @@ internal class ActivityLog(private val ctx: Context) {
                         val line = br.readLine() ?: break
                         var r = Buckets.Record.fromCsv(line)
                         if (r != null && r.ts % Buckets.BUCKET_MS != 0L) {   // legacy off-grid record: snap like sync()
-                            r = Buckets.Record(Buckets.lastBoundary(r.ts), r.steps, r.hr, r.hrCount)
+                            r = r.at(Buckets.lastBoundary(r.ts))
                         }
                         if (r != null) all.add(r)
                     }

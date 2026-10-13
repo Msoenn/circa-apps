@@ -10,6 +10,14 @@ import java.util.Map;
 final class PhoneDataTest {
     static final long NOW = 1_759_600_000_000L;   // 2025-10-04T17:46:40Z
 
+    /**
+     * The v2 weather line in the "Test hook" section of watchlink/DATA-CONTRACT.md, without the `GB(...)` framing: a
+     * 38-byte current block with every today's detail GB can carry, then three dry days (no hourly). Pasted on the
+     * watch as `adb shell am broadcast … --es line 'GB(<this>)'`.
+     */
+    static final String DOC_V2_LINE = "{\"t\":\"weather\",\"v\":2,\"l\":\"Springfield\",\"c\":\"light rain\",\"d\":\""
+            + "ExoLSFAjY4oHOwEJiydaAHECAEAa4miAu+JowPnhaJjQ4mi0AA8AAxoVEgsJBsJgwBQPCp1kLRQ3BQ==\"}";
+
     @SuppressWarnings("unchecked")
     static int feed(PhoneData d, String json, long now) {
         Proto.In in = Proto.classify("GB(" + json + ")");
@@ -77,6 +85,76 @@ final class PhoneDataTest {
         HostTest.check(PhoneData.owmCode(255) == 0 && PhoneData.owmCode(192 + 4) == 804 && PhoneData.owmCode(32) == 300
                 && PhoneData.owmCode(9) == 232 && PhoneData.owmCode(160 + 9) == 781 && PhoneData.owmCode(99) == 503,
                 "owmCode inverse mapping");
+
+        // weather v2 today's details: GB writes dew point, pressure, cloud cover, visibility, sun times and feels-like
+        // at the tail of the 38-byte current block (handleWeatherV2), after wind/wdir.
+        PhoneData wd = new PhoneData();
+        ByteArrayOutputStream det = new ByteArrayOutputStream();
+        b1(det, 19); b1(det, 26); b1(det, 11);              // temp, hi, lo (K-273)
+        det.write(72); det.write(80); det.write(35);        // humidity, rain, uv*10
+        det.write(96 + 3);                                  // mapped code: rain 503
+        b2(det, 1930); b2(det, 315);                        // wind*100 (19.3 km/h), wind direction
+        b1(det, 9); b2(det, 10123); det.write(90);          // dew point, pressure*10 hPa, cloud cover %
+        b4(det, 160000);                                    // visibility*10 (16000 m)
+        b4(det, 1759648320); b4(det, 1759689600);           // sunrise, sunset (epoch s)
+        b4(det, 1759640000); b4(det, 1759695000);           // moon rise/set (not served)
+        b2(det, 180); b1(det, 15);                          // moon phase, feels-like
+        HostTest.check(det.size() == 38, "v2 details fixture current block is 38 bytes (" + det.size() + ")");
+        long t3 = t2 + 60_000;
+        ch = feed(wd, "{t:\"weather\",v:2,l:\"Springfield\",c:\"light rain\",d:\""
+                + Base64.getEncoder().encodeToString(det.toByteArray()) + "\"}", t3);
+        w = wd.weather;
+        HostTest.check(ch == PhoneData.CH_WEATHER && w.feelsC == 15 && w.dewC == 9 && w.cloudPct == 90
+                && Math.abs(w.pressureHpa - 1012.3) < 1e-9 && Math.abs(w.visibilityM - 16000.0) < 1e-9
+                && w.sunriseMs == 1759648320_000L && w.sunsetMs == 1759689600_000L,
+                "weather v2 today's details (" + w.feelsC + "," + w.dewC + "," + w.pressureHpa + "," + w.visibilityM + ")");
+        // a later v1 push keeps them, the way it keeps the forecast; v1's own hi/lo are taken as sent
+        feed(wd, "{t:\"weather\",v:1,temp:295,hi:298,lo:288,hum:60,rain:10,uv:4,code:800,txt:\"clear\",wind:2,wdir:180,loc:\"Springfield\"}", t3 + 1);
+        w = wd.weather;
+        HostTest.check(w.tempC == 22 && w.hiC == 25 && w.loC == 15 && w.feelsC == 15 && w.dewC == 9
+                && w.pressureHpa == 1012.3 && w.cloudPct == 90 && w.visibilityM == 16000.0
+                && w.sunriseMs == 1759648320_000L && w.sunsetMs == 1759689600_000L,
+                "weather v1 push keeps the v2 details (" + w.hiC + "/" + w.loC + ")");
+        // GB's WeatherSpec defaults (0 K, 0 hPa, 0 %, 0 m, epoch 0) mark a field no provider filled; those read as null
+        PhoneData wb = new PhoneData();
+        ByteArrayOutputStream blank = new ByteArrayOutputStream();
+        b1(blank, 20); b1(blank, 22); b1(blank, 12);
+        blank.write(50); blank.write(10); blank.write(30); blank.write(192);
+        b2(blank, 500); b2(blank, 0);
+        b1(blank, -128); b2(blank, 0); blank.write(0); b4(blank, 0);
+        b4(blank, 0); b4(blank, 0); b4(blank, 0); b4(blank, 0); b2(blank, 0); b1(blank, -128);
+        feed(wb, "{t:\"weather\",v:2,l:\"Springfield\",d:\"" + Base64.getEncoder().encodeToString(blank.toByteArray()) + "\"}", t3);
+        w = wb.weather;
+        HostTest.check(w.tempC == 20 && w.hiC == 22 && w.loC == 12 && w.feelsC == null && w.dewC == null
+                && w.pressureHpa == null && w.cloudPct == null && w.visibilityM == null && w.sunriseMs == null
+                && w.sunsetMs == null, "weather v2 details: GB's unset defaults are null, not -128 C or 0");
+        // the documented DEBUG_GB_LINE example (watchlink/DATA-CONTRACT.md) is this block plus three dry days
+        PhoneData doc = new PhoneData();
+        ch = feed(doc, DOC_V2_LINE, t3);
+        w = doc.weather;
+        long tomorrow3 = (t3 / 86_400_000L + 1) * 86_400_000L;
+        String exp3 = "[{\"day_ms\":" + tomorrow3 + ",\"hi_c\":26,\"lo_c\":11,\"code\":802,\"rain_pct\":20},"
+                + "{\"day_ms\":" + (tomorrow3 + 86_400_000L) + ",\"hi_c\":21,\"lo_c\":9,\"code\":500,\"rain_pct\":55},"
+                + "{\"day_ms\":" + (tomorrow3 + 2 * 86_400_000L) + ",\"hi_c\":18,\"lo_c\":6,\"code\":800,\"rain_pct\":5}]";
+        HostTest.check(ch == PhoneData.CH_WEATHER && "Springfield".equals(w.location) && "light rain".equals(w.text)
+                && w.tempC == 19 && w.hiC == 26 && w.loC == 11 && w.humidity == 72 && w.rainPct == 80 && w.uv == 3.5
+                && w.code == 503 && w.windKmh == 19.3 && w.windDir == 315 && w.feelsC == 15 && w.dewC == 9
+                && w.pressureHpa == 1012.3 && w.cloudPct == 90 && w.visibilityM == 16000.0
+                && w.sunriseMs == 1759648320_000L && w.sunsetMs == 1759689600_000L && exp3.equals(w.forecastJson),
+                "documented DEBUG_GB_LINE v2 example decodes: " + w.forecastJson);
+        // persistence keeps the details
+        PhoneData wr = new PhoneData();
+        wr.load(doc.toJson());
+        HostTest.check(wr.weather != null && wr.weather.feelsC == 15 && wr.weather.dewC == 9
+                && wr.weather.pressureHpa == 1012.3 && wr.weather.cloudPct == 90 && wr.weather.visibilityM == 16000.0
+                && wr.weather.sunriseMs == 1759648320_000L && wr.weather.sunsetMs == 1759689600_000L
+                && exp3.equals(wr.weather.forecastJson), "persist round trip keeps the weather details");
+        // H == L == 43 C on the watch (hi == lo == current): WatchLink reads GB's own v1 hi/lo keys and v2 bytes 1-2
+        // (signed), so equal values in mean equal values out -- nothing derives hi/lo from the temperature.
+        PhoneData whl = new PhoneData();
+        feed(whl, "{t:\"weather\",v:1,temp:316,hi:316,lo:316,hum:40,rain:0,uv:11,code:800,txt:\"clear\",wind:5,wdir:90,loc:\"Springfield\"}", t3);
+        HostTest.check(whl.weather.tempC == 43 && whl.weather.hiC == 43 && whl.weather.loC == 43,
+                "weather hi/lo are GB's values as sent (equal in, equal out)");
 
         // music
         feed(d, "{t:\"musicstate\",state:\"play\",position:12,shuffle:0,repeat:0}", NOW);

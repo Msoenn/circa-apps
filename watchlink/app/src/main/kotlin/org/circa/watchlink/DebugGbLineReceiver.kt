@@ -13,6 +13,8 @@ import android.util.Log
  *     --es line 'GB({"t":"find","n":true})'
  * A line that starts with `{` is wrapped in `GB(...)` for convenience. `--ez connected true|false` (alone or with a
  * line) sets the /status connected flag and last_seen_ms as if a GB link were up/down (no command delivery).
+ * A `t=nav` line goes to the running service, which stores the route and buzzes the maneuver ([WatchLinkService.debugNav]);
+ * with no service running it is only stored, like every other line.
  */
 class DebugGbLineReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
@@ -36,6 +38,14 @@ class DebugGbLineReceiver : BroadcastReceiver() {
             resultData = "hr_sample bpm=$bpm steps=$steps"
             return
         }
+        // Replay a synthetic night through the sleep tracker (logged as "OUT.debug ...", nothing stored or sent):
+        //   --es sleep_replay night   or   --es sleep_replay '22:00;W*3;S*36;R*2;S*6;T;S*12;W*4'  (see SleepReplay)
+        i.getStringExtra("sleep_replay")?.let { spec ->
+            val ok = WatchLinkService.debugSleepReplay(spec)
+            Log.i(TAG, "DEBUG_GB_LINE sleep_replay service=" + (if (ok) "running" else "not running"))
+            resultData = "sleep_replay service=" + (if (ok) "running" else "not running")
+            return
+        }
         var line = i.getStringExtra("line")?.trim()
         if (line.isNullOrEmpty()) {
             if (i.hasExtra("connected")) return
@@ -49,6 +59,13 @@ class DebugGbLineReceiver : BroadcastReceiver() {
             val ok = parsed.msg?.let { WatchLinkService.debugTrack(it) } ?: false
             Log.i(TAG, "DEBUG_GB_LINE t=$tt service=" + (if (ok) "running" else "not running"))
             resultData = "t=$tt service=" + (if (ok) "running" else "not running")
+            return
+        }
+        // A nav line also drives the turn vibration, which lives in the running service; without it there is
+        // nothing to buzz, so the line is stored below like any other.
+        if (tt == "nav" && parsed.msg?.let { WatchLinkService.debugNav(it) } == true) {
+            Log.i(TAG, "DEBUG_GB_LINE t=nav service=running")
+            resultData = "t=nav service=running"
             return
         }
         PhoneStore.attach(c)

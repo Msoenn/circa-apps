@@ -81,4 +81,33 @@ class HealthMappingTest {
         assertEquals(0, HealthMapping.preferredSteps(watchLink = 0, sensor = 1_000))
         assertNull(HealthMapping.preferredSteps(watchLink = null, sensor = null))
     }
+
+    // ---- /sleep -> model ------------------------------------------------------------------------
+
+    @Test
+    fun aSleepRowBecomesTheSummary() {
+        assertEquals(SleepSummary(1_000L, 30_000_000L, 432), HealthMapping.sleep(1_000L, 30_000_000L, 432))
+    }
+
+    @Test
+    fun aPartialOrEmptySleepRowIsNoSleep() {
+        assertNull(HealthMapping.sleep(null, 30_000_000L, 432))
+        assertNull(HealthMapping.sleep(1_000L, null, 432))
+        assertNull(HealthMapping.sleep(1_000L, 30_000_000L, null))
+        assertNull(HealthMapping.sleep(1_000L, 30_000_000L, 0))
+        assertNull(HealthMapping.sleep(30_000_000L, 1_000L, 432))
+    }
+
+    @Test
+    fun sleepDurationReadsAsHoursAndMinutes() {
+        assertEquals("7 h 12 min", HealthMapping.sleepDuration(432))
+        assertEquals("8 h", HealthMapping.sleepDuration(480))
+        assertEquals("50 min", HealthMapping.sleepDuration(50))
+    }
+
+    @Test
+    fun noSleepByDefault() {
+        assertNull(HealthData.EMPTY.lastSleep)
+        assertNull(HealthMapping.latest(LatestRow(hrBpm = 72, hrTimeMs = 5, stepsToday = 1, stepsTimeMs = 5)).lastSleep)
+    }
 }

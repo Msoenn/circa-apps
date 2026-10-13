@@ -47,8 +47,15 @@ class LauncherSettingsTest {
     @Test
     fun stepStateRoundTrips() {
         val store = MapStore()
-        LauncherSettings(store).stepState = StepState(20_000, 123, 456)
-        assertEquals(StepState(20_000, 123, 456), LauncherSettings(store).stepState)
+        LauncherSettings(store).stepState = StepState(20_000, 123, 456, bootCount = 7)
+        assertEquals(StepState(20_000, 123, 456, 7), LauncherSettings(store).stepState)
+    }
+
+    @Test
+    fun stepStateWithoutABootCountReadsBackAsUnknown() {
+        // A preferences file written before the reboot carry-over has no boot-count key.
+        val store = MapStore(mutableMapOf("step_day" to 20_000L, "step_baseline" to 123L, "step_last" to 456L))
+        assertEquals(StepState(20_000, 123, 456, bootCount = -1), LauncherSettings(store).stepState)
     }
 
     @Test
