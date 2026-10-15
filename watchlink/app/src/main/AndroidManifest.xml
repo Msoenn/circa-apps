@@ -45,7 +45,7 @@
         <package android:name="org.circa.exercise" />
     </queries>
 
-    <application android:label="WatchLink" android:hasCode="true" android:allowBackup="false"
+    <application android:label="WatchLink" android:icon="@drawable/ic_watchlink" android:hasCode="true" android:allowBackup="false"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity android:name=".MainActivity"
             android:exported="true"
