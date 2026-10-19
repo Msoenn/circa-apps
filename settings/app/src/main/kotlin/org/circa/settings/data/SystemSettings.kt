@@ -6,15 +6,23 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.hardware.usb.UsbManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import android.util.Log
+import android.net.Uri
+import android.os.Bundle
 import org.circa.settings.model.Accent
+import org.circa.settings.model.AutoReboot
+import org.circa.settings.model.BackgroundScanning
+import org.circa.settings.model.InternetCheck
+import org.circa.settings.model.WifiMacRandomization
+import org.circa.settings.model.PrivacyMigration
+import org.circa.settings.model.ScramblePinPad
+import org.circa.settings.model.UsbDataMode
+import org.circa.settings.model.WifiAutoOff
 import org.circa.settings.model.LongPressAction
 import org.circa.settings.model.Profile
 import org.circa.settings.model.ProfileField
@@ -70,8 +78,20 @@ data class SettingsSnapshot(
     val autoDetect: Boolean = true,
     /** Settings.Secure circa_sleep_tracking: WatchLink's sleep tracking (default on). */
     val sleepTracking: Boolean = true,
-    /** Settings.Global circa_usb_data: the USB/charging port's data signalling (default on). */
-    val usbData: Boolean = true,
+    /** Settings.Global circa_usb_data: what the USB port may do (the system applies it). */
+    val usbData: UsbDataMode = UsbDataMode.DEFAULT,
+    /** Settings.Global circa_auto_reboot_ms (0 = off). */
+    val autoRebootMs: Long = AutoReboot.DEFAULT_MS,
+    /** Settings.Global circa_wifi_auto_off_ms (0 = off). */
+    val wifiAutoOffMs: Long = WifiAutoOff.DEFAULT_MS,
+    /** Settings.Global captive_portal_mode. */
+    val internetCheck: InternetCheck = InternetCheck.DEFAULT,
+    /** Settings.Global non_persistent_mac_randomization_force_enabled: only "1" is on. */
+    val wifiMacRandomization: Boolean = false,
+    /** Settings.Global wifi_scan_always_enabled and ble_scan_always_enabled: on only when both are "1". */
+    val backgroundScanning: Boolean = false,
+    /** LineageSettings.System lockscreen_scramble_pin_layout; null = no Lineage settings provider (row hidden). */
+    val scramblePin: Boolean? = null,
 )
 
 /**
@@ -102,6 +122,7 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
     fun read(): SettingsSnapshot {
         migrateTiltWake()
         migrateScreenTimeout()
+        migratePrivacyDefaults()
         return SettingsSnapshot(
             qs = quick.read(),
             airplane = Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
@@ -137,7 +158,16 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             sleepTracking = ProfileModel.sleepTrackingOn(
                 getRaw(SettingKey(SettingsTable.SECURE, ProfileKeys.SLEEP_TRACKING)),
             ),
-            usbData = ProfileModel.usbDataOn(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.USB_DATA))),
+            usbData = UsbDataMode.parse(global(ProfileKeys.USB_DATA)),
+            autoRebootMs = AutoReboot.parse(global(AutoReboot.KEY)),
+            wifiAutoOffMs = WifiAutoOff.parse(global(WifiAutoOff.KEY)),
+            internetCheck = InternetCheck.parse(global(InternetCheck.KEY)),
+            wifiMacRandomization = WifiMacRandomization.parse(global(WifiMacRandomization.KEY)),
+            backgroundScanning = BackgroundScanning.parse(
+                global(BackgroundScanning.WIFI_KEY),
+                global(BackgroundScanning.BLE_KEY),
+            ),
+            scramblePin = readScramblePin(),
         )
     }
 
@@ -168,6 +198,20 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
         }
         if (migrated == null) putRaw(flag, "1")
     }
+
+    /**
+     * The one-time privacy defaults for watches that predate them (see [PrivacyMigration]),
+     * recorded in `circa_privacy_defaults_v1`. There is no boot receiver any more, so this runs
+     * with the first read after the app starts.
+     */
+    private fun migratePrivacyDefaults() {
+        val flag = global(PrivacyMigration.FLAG)
+        if (flag != null) return
+        for ((name, value) in PrivacyMigration.plan(flag, ::global)) putRaw(SettingKey(SettingsTable.GLOBAL, name), value)
+        putRaw(SettingKey(SettingsTable.GLOBAL, PrivacyMigration.FLAG), "1")
+    }
+
+    private fun global(name: String) = getRaw(SettingKey(SettingsTable.GLOBAL, name))
 
     private fun secure(name: String) = getRaw(SettingKey(SettingsTable.SECURE, name))
 
@@ -258,43 +302,26 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
         return wrote
     }
 
-    /**
-     * The USB/charging port's data signalling (`circa_usb_data`, Settings.Global): the key is written
-     * first so the choice survives a reboot, then pushed to the port. Off means charging only - no
-     * data, no adb, no MTP.
-     */
-    fun setUsbData(on: Boolean): Boolean {
-        val wrote = runCatching {
-            Settings.Global.putInt(resolver, ProfileKeys.USB_DATA, if (on) 1 else 0)
-        }.getOrDefault(false)
-        enableUsbDataSignal(on)
-        return wrote
-    }
+    /** `circa_usb_data` (Settings.Global): only the key is written; the system applies it. */
+    fun setUsbData(mode: UsbDataMode): Boolean = putRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.USB_DATA), mode.value)
 
-    /**
-     * Re-applies the stored USB choice at boot ([UsbDataReceiver]): the USB HAL comes up with data
-     * signalling enabled on every boot, so a stored `circa_usb_data` 0 is pushed again. Unset or on
-     * means the platform default already matches the choice, and nothing is called.
-     */
-    fun applyUsbData(): Boolean =
-        if (ProfileModel.usbDataOn(getRaw(SettingKey(SettingsTable.GLOBAL, ProfileKeys.USB_DATA)))) {
-            true
-        } else {
-            enableUsbDataSignal(false)
-        }
+    /** `circa_wifi_auto_off_ms` (Settings.Global): 0 = never. */
+    fun setWifiAutoOff(ms: Long): Boolean = putRaw(SettingKey(SettingsTable.GLOBAL, WifiAutoOff.KEY), ms.toString())
 
-    /**
-     * `UsbManager.enableUsbDataSignal` is @SystemApi (MANAGE_USB) and not in the public SDK the app
-     * compiles against, so it is called reflectively. A platform without it, a refused call or a
-     * missing service logs a warning and returns false; the port then keeps the platform default.
-     */
-    private fun enableUsbDataSignal(on: Boolean): Boolean {
-        val usb = context.getSystemService(UsbManager::class.java)
-        return runCatching {
-            UsbManager::class.java
-                .getMethod("enableUsbDataSignal", Boolean::class.javaPrimitiveType)
-                .invoke(usb, on) as Boolean
-        }.onFailure { Log.w(TAG, "enableUsbDataSignal($on)", it) }.getOrDefault(false)
+    /** `captive_portal_mode` (Settings.Global): 0 = off, 1 = standard. */
+    fun setInternetCheck(check: InternetCheck): Boolean =
+        putRaw(SettingKey(SettingsTable.GLOBAL, InternetCheck.KEY), check.value.toString())
+
+    /** `non_persistent_mac_randomization_force_enabled` (Settings.Global): 1 = a new address per network. */
+    fun setWifiMacRandomization(on: Boolean): Boolean =
+        putRaw(SettingKey(SettingsTable.GLOBAL, WifiMacRandomization.KEY), WifiMacRandomization.encode(on))
+
+    /** `wifi_scan_always_enabled` and `ble_scan_always_enabled` (Settings.Global): always written together. */
+    fun setBackgroundScanning(on: Boolean): Boolean {
+        val value = BackgroundScanning.encode(on)
+        val wifi = putRaw(SettingKey(SettingsTable.GLOBAL, BackgroundScanning.WIFI_KEY), value)
+        val ble = putRaw(SettingKey(SettingsTable.GLOBAL, BackgroundScanning.BLE_KEY), value)
+        return wifi && ble
     }
 
     // ---- Display --------------------------------------------------------------------------------
@@ -344,6 +371,26 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
 
     fun setLockAfter(ms: Long): Boolean =
         putRaw(SettingKey(SettingsTable.SECURE, LOCK_AFTER_KEY), ms.toString())
+
+    /** `circa_auto_reboot_ms` (Settings.Global): 0 = never; the system restarts the watch. */
+    fun setAutoReboot(ms: Long): Boolean = putRaw(SettingKey(SettingsTable.GLOBAL, AutoReboot.KEY), ms.toString())
+
+    private val lineageSettings = Uri.parse("content://lineagesettings")
+
+    /** The scramble flag from the Lineage settings provider; null when the provider is missing. */
+    private fun readScramblePin(): Boolean? = runCatching {
+        val out = resolver.call(lineageSettings, "GET_system", ScramblePinPad.KEY, null) ?: return@runCatching null
+        ScramblePinPad.parse(out.getString("value"))
+    }.getOrNull()
+
+    /** "Scramble PIN pad": LineageSettings.System, written through the provider's PUT_system call. */
+    fun setScramblePin(on: Boolean): Boolean = runCatching {
+        resolver.call(
+            lineageSettings, "PUT_system", ScramblePinPad.KEY,
+            Bundle().apply { putString("value", ScramblePinPad.encode(on)) },
+        )
+        true
+    }.getOrDefault(false)
 
     /** "Lock when taken off": the launcher's off-body lock observes this key. */
     fun setLockWhenTakenOff(on: Boolean): Boolean =

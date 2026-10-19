@@ -31,7 +31,9 @@ import kotlinx.coroutines.delay
 import org.circa.settings.SettingsController
 import org.circa.settings.data.WifiData
 import org.circa.settings.data.WifiSnapshot
+import org.circa.settings.model.InternetCheck
 import org.circa.settings.model.JoinOutcome
+import org.circa.settings.model.WifiAutoOff
 import org.circa.settings.model.SettingsPage
 import org.circa.settings.model.WifiEntry
 import org.circa.settings.model.WifiModel
@@ -128,11 +130,23 @@ internal fun WifiPage(c: SettingsController) {
     val w = rememberWifi(scan = true)
     ListPage(c, SettingsPage.WIFI) { spec ->
         val s = w.snap.value
+        val g = c.settingsState.value
         toggleRow("wifi_toggle", spec, "Wi-Fi", s.enabled, CircaSymbols.Outlined.Wifi, secondary = onOff(s.enabled)) { on ->
             w.data.setEnabled(on)
             w.refresh()
             c.refreshSettings()
         }
+        navRow("wifi_auto_off", spec, "Turn off when unused", CircaSymbols.Outlined.Schedule,
+            secondary = WifiAutoOff.summary(g.wifiAutoOffMs),
+        ) { c.openSettingsPage(SettingsPage.WIFI_AUTO_OFF) }
+        navRow("internet_check", spec, "Internet check", CircaSymbols.Outlined.Wifi,
+            secondary = if (g.internetCheck == InternetCheck.OFF) "Off" else g.internetCheck.label,
+        ) { c.openSettingsPage(SettingsPage.INTERNET_CHECK) }
+        toggleRow(
+            "wifi_mac_randomization", spec, "Random Wi-Fi address", g.wifiMacRandomization,
+            CircaSymbols.Outlined.Wifi,
+            secondary = if (g.wifiMacRandomization) "New address per network" else "Uses the watch's own address",
+        ) { c.setWifiMacRandomization(it) }
         if (!s.enabled) {
             noteItem("wifi_off_note", "Turn on Wi-Fi to see networks")
             return@ListPage
@@ -156,6 +170,22 @@ internal fun WifiPage(c: SettingsController) {
             secondary = s.saved.distinctBy { it.ssid }.size.let { if (it == 1) "1 network" else "$it networks" },
         ) { c.openSettingsPage(SettingsPage.WIFI_SAVED) }
         navRow("wifi_add", spec, "Add network", CircaSymbols.Outlined.Add) { c.openSettingsPage(SettingsPage.WIFI_ADD) }
+    }
+}
+
+@Composable
+internal fun WifiAutoOffPage(c: SettingsController) = ListPage(c, SettingsPage.WIFI_AUTO_OFF) { spec ->
+    val current = c.settingsState.value.wifiAutoOffMs
+    WifiAutoOff.OPTIONS.forEach { ms ->
+        radioRow("wifi_auto_off_$ms", spec, WifiAutoOff.option(ms), current == ms) { c.setWifiAutoOff(ms) }
+    }
+}
+
+@Composable
+internal fun InternetCheckPage(c: SettingsController) = ListPage(c, SettingsPage.INTERNET_CHECK) { spec ->
+    val current = c.settingsState.value.internetCheck
+    InternetCheck.entries.forEach { m ->
+        radioRow("internet_check_${m.value}", spec, m.label, current == m, secondary = m.hint) { c.setInternetCheck(m) }
     }
 }
 

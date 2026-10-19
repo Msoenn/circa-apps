@@ -56,12 +56,9 @@
         android:name="android.permission.NETWORK_AIRPLANE_MODE"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- USB data (Connectivity page): UsbManager.enableUsbDataSignal (@SystemApi, signature|privileged),
-         and the boot receiver that pushes a stored "charging only" choice back to the USB HAL. -->
-    <uses-permission
-        android:name="android.permission.MANAGE_USB"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Scramble PIN pad: LineageSettings.System lockscreen_scramble_pin_layout, written through the
+         Lineage settings provider. -->
+    <uses-permission android:name="lineageos.permission.WRITE_SETTINGS" />
 
     <!-- Battery saver: PowerManager.setPowerSaveModeEnabled. -->
     <uses-permission
@@ -1008,22 +1005,6 @@
             android:taskAffinity="org.circa.settings.pairing"
             android:screenOrientation="nosensor"
             android:configChanges="locale|layoutDirection|fontScale|fontWeightAdjustment|density" />
-
-        <!-- The USB HAL comes up with data signalling on every boot, so a stored "charging only"
-             choice is pushed back (UsbDataReceiver, data/SystemSettings.applyUsbData).
-             LOCKED_BOOT_COMPLETED arrives before the user unlocks - the receiver is direct-boot
-             aware, so the port is locked down as soon as it is live - and BOOT_COMPLETED covers the
-             rest of the boot. Both are protected broadcasts (system only), so the receiver is
-             exported to let the system reach it. -->
-        <receiver
-            android:name=".UsbDataReceiver"
-            android:directBootAware="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
 
     </application>
 

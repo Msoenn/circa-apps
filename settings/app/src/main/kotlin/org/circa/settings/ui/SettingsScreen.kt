@@ -76,6 +76,9 @@ import org.circa.settings.model.LockTimeout
 import org.circa.settings.model.AodBrightness
 import org.circa.settings.model.TiltWake
 import org.circa.settings.model.LockWhenTakenOffRow
+import org.circa.settings.model.AutoReboot
+import org.circa.settings.model.ScramblePinPad
+import org.circa.settings.model.UsbDataMode
 import org.circa.settings.model.Ringer
 import org.circa.settings.model.ScreenTimeout
 import org.circa.settings.model.SettingsPage
@@ -123,6 +126,10 @@ fun SettingsScreen(controller: SettingsController) {
         SettingsPage.APPS -> AppsPage(controller)
         SettingsPage.SECURITY -> SecurityPage(controller)
         SettingsPage.LOCK_TIMEOUT -> LockTimeoutPage(controller)
+        SettingsPage.AUTO_REBOOT -> AutoRebootPage(controller)
+        SettingsPage.USB_DATA -> UsbDataPage(controller)
+        SettingsPage.WIFI_AUTO_OFF -> WifiAutoOffPage(controller)
+        SettingsPage.INTERNET_CHECK -> InternetCheckPage(controller)
         SettingsPage.BATTERY -> BatteryPage(controller)
         SettingsPage.BATTERY_USAGE -> BatteryUsagePage(controller)
         SettingsPage.DEFAULT_APPS -> DefaultAppsPage(controller)
@@ -268,17 +275,19 @@ internal fun TransformingLazyColumnScope.navRow(
     icon: ImageVector? = null,
     secondary: String? = null,
     secondaryLines: Int = 1,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) = item(key = id) {
     FilledTonalButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = ROW_MIN_HEIGHT)
             .transformedHeight(this, spec)
             .testTag(rowTag(id)),
         transformation = SurfaceTransformation(spec),
-        icon = icon?.let { v -> { Icon(v, contentDescription = null, modifier = Modifier.size(ICON), tint = ROW_ICON_TINT) } },
+        icon = icon?.let { v -> { Icon(v, contentDescription = null, modifier = Modifier.size(ICON), tint = ROW_ICON_TINT.copy(alpha = if (enabled) 1f else 0.38f)) } },
         secondaryLabel = secondary?.let { s -> { Text(s, maxLines = secondaryLines, overflow = TextOverflow.Ellipsis) } },
         label = { Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis) },
     )
@@ -371,12 +380,22 @@ private fun ConnectivityPage(c: SettingsController) = ListPage(c, SettingsPage.C
     toggleRow("airplane", spec, "Airplane mode", s.airplane, CircaSymbols.Outlined.Flight, secondary = onOff(s.airplane)) {
         c.setAirplane(it)
     }
-    // Off = the port only charges (no data, no adb, no MTP); the choice is written to
-    // Settings.Global circa_usb_data and re-applied at boot (UsbDataReceiver).
     toggleRow(
-        "usb_data", spec, "USB data", s.usbData, CircaSymbols.Outlined.Computer,
-        secondary = if (s.usbData) "Computer connections allowed" else "Charging only",
-    ) { c.setUsbData(it) }
+        "background_scanning", spec, "Background scanning", s.backgroundScanning,
+        CircaSymbols.Outlined.BluetoothSearching,
+        secondary = "Scans for location while Wi-Fi and Bluetooth are off",
+    ) { c.setBackgroundScanning(it) }
+    navRow("usb_data", spec, "USB data", CircaSymbols.Outlined.Computer, secondary = s.usbData.label) {
+        c.openSettingsPage(SettingsPage.USB_DATA)
+    }
+}
+
+@Composable
+private fun UsbDataPage(c: SettingsController) = ListPage(c, SettingsPage.USB_DATA) { spec ->
+    val current = c.settingsState.value.usbData
+    UsbDataMode.entries.forEach { m ->
+        radioRow("usb_data_${m.value}", spec, m.option, current == m, secondary = m.hint) { c.setUsbData(m) }
+    }
 }
 
 @Composable
@@ -505,6 +524,27 @@ private fun SecurityPage(c: SettingsController) = ListPage(c, SettingsPage.SECUR
         secondary = LockWhenTakenOffRow.secondary(s.deviceSecure, on),
         enabled = LockWhenTakenOffRow.enabled(s.deviceSecure),
     ) { c.setLockWhenTakenOff(it) }
+    navRow(
+        "auto_reboot", spec, "Auto restart", CircaSymbols.Outlined.RestartAlt,
+        secondary = AutoReboot.secondary(s.deviceSecure, s.autoRebootMs),
+        enabled = AutoReboot.enabled(s.deviceSecure),
+    ) { c.openSettingsPage(SettingsPage.AUTO_REBOOT) }
+    s.scramblePin?.let { scramble ->
+        toggleRow(
+            "scramble_pin", spec, "Scramble PIN pad",
+            ScramblePinPad.checked(s.deviceSecure, scramble), CircaSymbols.Outlined.Pin,
+            secondary = ScramblePinPad.SECONDARY,
+            enabled = ScramblePinPad.enabled(s.deviceSecure),
+        ) { c.setScramblePin(it) }
+    }
+}
+
+@Composable
+private fun AutoRebootPage(c: SettingsController) = ListPage(c, SettingsPage.AUTO_REBOOT) { spec ->
+    val current = c.settingsState.value.autoRebootMs
+    AutoReboot.OPTIONS.forEach { ms ->
+        radioRow("auto_reboot_$ms", spec, AutoReboot.option(ms), current == ms) { c.setAutoReboot(ms) }
+    }
 }
 
 @Composable

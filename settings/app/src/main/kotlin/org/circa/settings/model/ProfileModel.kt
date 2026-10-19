@@ -5,7 +5,7 @@ import kotlin.math.roundToInt
 
 /**
  * The user profile the Exercise app reads (calories, heart-rate zones), the side-button long-press
- * choice and the USB port's data signalling, shared through Settings (settings/README.md). Pure:
+ * choice, shared through Settings (settings/README.md). Pure:
  * parsing, labels, value ranges and stepping are unit tested in `ProfileModelTest`;
  * `data/SystemSettings` reads and writes the keys.
  *
@@ -33,10 +33,7 @@ object ProfileKeys {
     /** Settings.Secure, int: 0 = off, anything else or absent = on (default). WatchLink detects sleep for Gadgetbridge. */
     const val SLEEP_TRACKING = "circa_sleep_tracking"
 
-    /**
-     * Settings.Global, int: 0 = off, anything else or absent = on (default). Off = the USB/charging
-     * port carries no data at all (no adb, no MTP), and the choice is pushed to the USB HAL again at boot.
-     */
+    /** Settings.Global, "1" / "0" / "2" (see [UsbDataMode]); absent = on. The system applies it. */
     const val USB_DATA = "circa_usb_data"
 
     /** Settings.Global, "list" | "last" | "power"; absent = "list". Read by the framework and the Exercise app. */
@@ -103,9 +100,6 @@ object ProfileModel {
 
     /** `circa_sleep_tracking`: only an explicit 0 turns WatchLink's sleep tracking off. */
     fun sleepTrackingOn(raw: String?): Boolean = raw?.trim() != "0"
-
-    /** `circa_usb_data`: only an explicit 0 turns the USB port's data signalling off (charging only). */
-    fun usbDataOn(raw: String?): Boolean = raw?.trim() != "0"
 
     /** Youngest allowed age for the birth-year picker. */
     private const val MIN_AGE = 5

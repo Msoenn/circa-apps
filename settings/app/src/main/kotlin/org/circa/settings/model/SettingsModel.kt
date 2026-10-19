@@ -22,6 +22,8 @@ enum class SettingsPage(val id: String, val title: String, val parent: SettingsP
     LOCATION("location", "Location", MAIN),
     SECURITY("security", "Security", MAIN),
     LOCK_TIMEOUT("lock_timeout", "Lock after", SECURITY),
+    AUTO_REBOOT("auto_reboot", "Auto restart", SECURITY),
+    USB_DATA("usb_data", "USB data", CONNECTIVITY),
     BATTERY("battery", "Battery", MAIN),
     BATTERY_USAGE("battery_usage", "Battery usage", BATTERY),
     SYSTEM("system", "System", MAIN),
@@ -54,6 +56,8 @@ enum class SettingsPage(val id: String, val title: String, val parent: SettingsP
     // ---- Wi-Fi sub-pages ----
     WIFI_SAVED("wifi_saved", "Saved networks", WIFI),
     WIFI_ADD("wifi_add", "Add network", WIFI),
+    WIFI_AUTO_OFF("wifi_auto_off", "Turn off when unused", WIFI),
+    INTERNET_CHECK("internet_check", "Internet check", WIFI),
     // ---- Bluetooth sub-pages: rename and forget-confirm of one paired device (pageArg = address) ----
     BT_RENAME("bt_rename", "Rename", BT_DEVICE),
     BT_FORGET("bt_forget", "Forget device", BT_DEVICE),

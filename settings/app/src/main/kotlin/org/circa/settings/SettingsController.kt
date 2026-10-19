@@ -9,7 +9,9 @@ import org.circa.settings.data.SystemSettings
 import org.circa.settings.model.Accent
 import org.circa.settings.model.GestureRow
 import org.circa.settings.model.LongPressAction
+import org.circa.settings.model.InternetCheck
 import org.circa.settings.model.ProfileField
+import org.circa.settings.model.UsbDataMode
 import org.circa.settings.model.Sex
 import org.circa.settings.model.AodBrightness
 import org.circa.settings.model.TiltWake
@@ -105,5 +107,11 @@ class SettingsController(context: Context, private val finish: () -> Unit) {
     fun setLongPress(action: LongPressAction) = change { setLongPress(action) }
     fun setAutoDetect(on: Boolean) = change { setAutoDetect(on) }
     fun setSleepTracking(on: Boolean) = change { setSleepTracking(on) }
-    fun setUsbData(on: Boolean) = change { setUsbData(on) }
+    fun setUsbData(mode: UsbDataMode) = change { setUsbData(mode) }
+    fun setAutoReboot(ms: Long) = change { setAutoReboot(ms) }
+    fun setWifiAutoOff(ms: Long) = change { setWifiAutoOff(ms) }
+    fun setInternetCheck(check: InternetCheck) = change { setInternetCheck(check) }
+    fun setWifiMacRandomization(on: Boolean) = change { setWifiMacRandomization(on) }
+    fun setBackgroundScanning(on: Boolean) = change { setBackgroundScanning(on) }
+    fun setScramblePin(on: Boolean) = change { setScramblePin(on) }
 }

@@ -83,13 +83,16 @@ class ProfileModelTest {
     }
 
     @Test
-    fun usbDataDefaultsToOn() {
+    fun usbDataModes() {
         assertEquals("circa_usb_data", ProfileKeys.USB_DATA)
-        assertEquals(true, ProfileModel.usbDataOn(null))
-        assertEquals(true, ProfileModel.usbDataOn("1"))
-        assertEquals(true, ProfileModel.usbDataOn("garbage"))
-        assertEquals(false, ProfileModel.usbDataOn("0"))
-        assertEquals(false, ProfileModel.usbDataOn(" 0 "))
+        assertEquals(UsbDataMode.ON, UsbDataMode.parse(null))
+        assertEquals(UsbDataMode.ON, UsbDataMode.parse("1"))
+        assertEquals(UsbDataMode.ON, UsbDataMode.parse("garbage"))
+        assertEquals(UsbDataMode.CHARGING_ONLY, UsbDataMode.parse("0"))
+        assertEquals(UsbDataMode.CHARGING_ONLY, UsbDataMode.parse(" 0 "))
+        assertEquals(UsbDataMode.CHARGING_WHEN_LOCKED, UsbDataMode.parse("2"))
+        assertEquals("Charging only when locked", UsbDataMode.CHARGING_WHEN_LOCKED.label)
+        assertEquals("USB debugging off; use Wi-Fi", UsbDataMode.CHARGING_ONLY.hint)
     }
 
     @Test
