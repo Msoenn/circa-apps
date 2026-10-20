@@ -1,6 +1,10 @@
 package org.circa.watchlink
 
+import android.app.AlarmManager
+import android.app.BroadcastOptions
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -39,6 +43,8 @@ internal class SleepTracking(
     private val log: ActivityLog,
     private val wakeAcquire: (String, Long) -> Int,
     private val wakeRelease: (Int) -> Unit,
+    /** The service intent for the Smart Wake minute tick ([smartTick]). */
+    private val smartTickIntent: () -> PendingIntent,
 ) {
     private val prefs: SharedPreferences = ctx.getSharedPreferences("sleep", Context.MODE_PRIVATE)
     private val labelsFile = File(ctx.filesDir, "sleep-labels.csv")
@@ -60,15 +66,24 @@ internal class SleepTracking(
     private var flushToken = 0
     private var started = false
 
+    // Smart Wake: one watch at a time (Clock asks for the next Smart Wake alarm only).
+    private var smart: SmartWakeDetector? = null
+    private var smartCallback: PendingIntent? = null
+    private var smartDeadline = 0L          // elapsedRealtime of the alarm's set time
+    private var smartToken = 0
+
     private val accelListener = object : SensorEventListener2 {
         override fun onSensorChanged(e: SensorEvent) {
-            motion.add(e.timestamp / 1_000_000L, e.values[0], e.values[1], e.values[2])
+            val t = e.timestamp / 1_000_000L
+            motion.add(t, e.values[0], e.values[1], e.values[2])
+            smart?.add(t, e.values[0], e.values[1], e.values[2])
         }
 
         override fun onAccuracyChanged(s: Sensor?, accuracy: Int) {}
 
         override fun onFlushCompleted(s: Sensor?) {
             finishClose("flushed")
+            smartEvaluate("flushed")
         }
     }
 
@@ -81,6 +96,7 @@ internal class SleepTracking(
     }
 
     private val flushTimeout = Runnable { finishClose("flush timeout") }
+    private val smartFlushTimeout = Runnable { smartEvaluate("flush timeout") }
 
     fun start() {
         if (started) return
@@ -94,6 +110,7 @@ internal class SleepTracking(
     fun stop() {
         started = false
         finishClose("stop")
+        smartEnd("service stopping")
         unregister()
     }
 
@@ -108,6 +125,9 @@ internal class SleepTracking(
     fun active(): Boolean = accelOn && enabled()
 
     fun setCharging(on: Boolean) = worn.setCharging(SystemClock.elapsedRealtime(), on)
+
+    /** Current wrist state: off-body sensor and not charging. Not measuring (tracking off) counts as worn. */
+    fun wornNow(): Boolean = worn.worn()
 
     /** Register or release the sensors to match the setting (checked at every bucket). */
     private fun updateSensors() {
@@ -192,6 +212,7 @@ internal class SleepTracking(
      */
     fun onBucket(r: Buckets.Record, exerciseKind: String?): List<Labelled> {
         val out = ArrayList<Labelled>()
+        val wasAsleep = tracker.asleep
         when {
             exerciseKind != null -> {
                 out.addAll(tracker.flush())
@@ -206,7 +227,87 @@ internal class SleepTracking(
             else -> out.addAll(tracker.offer(r, resting()))
         }
         record(out)
+        if (tracker.asleep != wasAsleep) announceSleepState(ctx, tracker.asleep)
         return out
+    }
+
+    // ---- Smart Wake (docs/watch-ui/circa/bedtime.md) ----
+
+    /**
+     * Clock's Smart Wake window opened: watch the wrist until [deadlineWallMs] (the alarm's set time) and send
+     * [callback] once the wearer stirs. Replaces any earlier watch. Without the accelerometer nothing is watched and
+     * the alarm rings at its set time.
+     */
+    fun smartRequest(deadlineWallMs: Long, callback: PendingIntent) {
+        smartEnd("replaced")
+        updateSensors()
+        val now = SystemClock.elapsedRealtime()
+        val left = deadlineWallMs - System.currentTimeMillis()
+        if (!active() || left <= 0) {
+            Log.i(TAG, "smart wake: not watching (tracking active=${active()}, ${left / 1000} s left)")
+            return
+        }
+        smart = SmartWakeDetector(now)
+        smartCallback = callback
+        smartDeadline = now + left
+        Log.i(TAG, "smart wake: watching for ${left / 60_000} min")
+        armSmartTick()
+    }
+
+    fun smartCancel() = smartEnd("cancelled by Clock")
+
+    /** The minute tick: collect the accelerometer batch, then [smartEvaluate] (bounded by a timeout). */
+    fun smartTick() {
+        if (smart == null) return
+        if (SystemClock.elapsedRealtime() >= smartDeadline) {
+            smartEnd("deadline")
+            return
+        }
+        if (smartToken != 0) wakeRelease(smartToken)
+        smartToken = wakeAcquire("smart-wake", FLUSH_TIMEOUT_MS + 500)
+        h.removeCallbacks(smartFlushTimeout)
+        h.postDelayed(smartFlushTimeout, FLUSH_TIMEOUT_MS)
+        val ok = try { sm.flush(accelListener) } catch (e: Exception) { false }
+        if (!ok) smartEvaluate("flush refused")
+    }
+
+    private fun smartEvaluate(why: String) {
+        val d = smart ?: return
+        if (smartToken == 0) return   // a flush for a bucket close, not for us
+        h.removeCallbacks(smartFlushTimeout)
+        val now = SystemClock.elapsedRealtime()
+        val stirring = d.evaluate(now, worn.worn())
+        Log.d(TAG, "smart wake: minutes=${d.minutes} stirring=$stirring ($why)")
+        if (stirring && now < smartDeadline) {
+            try {
+                smartCallback?.send()
+                Log.i(TAG, "smart wake: stirring ${(smartDeadline - now) / 60_000} min before the alarm, told Clock")
+            } catch (e: PendingIntent.CanceledException) {
+                Log.i(TAG, "smart wake: Clock's callback was cancelled")
+            }
+            smartEnd("fired")
+        } else {
+            wakeRelease(smartToken)
+            smartToken = 0
+            armSmartTick()
+        }
+    }
+
+    private fun armSmartTick() {
+        val at = Math.min(SystemClock.elapsedRealtime() + SMART_TICK_MS, smartDeadline)
+        val am = ctx.getSystemService(AlarmManager::class.java) ?: return
+        am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, smartTickIntent())
+    }
+
+    private fun smartEnd(why: String) {
+        if (smart == null) return
+        smart = null
+        smartCallback = null
+        h.removeCallbacks(smartFlushTimeout)
+        ctx.getSystemService(AlarmManager::class.java)?.cancel(smartTickIntent())
+        if (smartToken != 0) wakeRelease(smartToken)
+        smartToken = 0
+        Log.i(TAG, "smart wake: stopped ($why)")
     }
 
     /** ts of the oldest bucket still held back (0 = none): a backfill must not send it yet. */
@@ -337,6 +438,26 @@ internal class SleepTracking(
 
         /** Settings.Secure key, written by Circa Settings; absent or anything but "0" = on. */
         const val SETTING_KEY = "circa_sleep_tracking"
+
+        /** Smart Wake: how often the accelerometer batch is collected and judged inside the window. */
+        const val SMART_TICK_MS = 60_000L
+
+        /** To the Circa shade (Bedtime's "start when asleep"): the tracker started or ended a night. */
+        const val ACTION_SLEEP_STATE = "org.circa.watchlink.action.SLEEP_STATE"
+        const val EXTRA_ASLEEP = "asleep"
+        private const val SYSTEMUI = "com.android.systemui"
+
+        /** Tells the shade the sleep state changed; it checks the sender, so the identity is shared. */
+        @JvmStatic
+        fun announceSleepState(c: Context, asleep: Boolean) {
+            try {
+                val opts = BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle()
+                c.sendBroadcast(Intent(ACTION_SLEEP_STATE).setPackage(SYSTEMUI).putExtra(EXTRA_ASLEEP, asleep), null, opts)
+                Log.i(TAG, "sleep: told the shade asleep=$asleep")
+            } catch (e: Exception) {
+                Log.i(TAG, "sleep: state broadcast failed: $e")
+            }
+        }
 
         /** Hard cap on waiting for the accelerometer flush (and on its wakelock). */
         const val FLUSH_TIMEOUT_MS = 2_000L

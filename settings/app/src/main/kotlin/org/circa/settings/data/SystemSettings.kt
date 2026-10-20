@@ -31,6 +31,9 @@ import org.circa.settings.model.ProfileModel
 import org.circa.settings.model.Sex
 import org.circa.settings.model.GestureModel
 import org.circa.settings.model.GestureRow
+import org.circa.settings.model.HealthKeys
+import org.circa.settings.model.HeartAlertSettings
+import org.circa.settings.model.PhoneLeftAlertSetting
 import org.circa.settings.model.AodBrightness
 import org.circa.settings.model.AodBrightnessModel
 import org.circa.settings.model.TiltWake
@@ -78,6 +81,12 @@ data class SettingsSnapshot(
     val autoDetect: Boolean = true,
     /** Settings.Secure circa_sleep_tracking: WatchLink's sleep tracking (default on). */
     val sleepTracking: Boolean = true,
+    /** Settings.Secure circa_hr_high_bpm: WatchLink's high heart-rate alert (0 = off). */
+    val hrHighBpm: Int = HeartAlertSettings.HIGH_DEFAULT,
+    /** Settings.Secure circa_hr_low_bpm: WatchLink's low heart-rate alert (0 = off). */
+    val hrLowBpm: Int = HeartAlertSettings.LOW_DEFAULT,
+    /** Settings.Secure circa_phone_left_alert: WatchLink's phone-left-behind alert (default on). */
+    val phoneLeftAlert: Boolean = true,
     /** Settings.Global circa_usb_data: what the USB port may do (the system applies it). */
     val usbData: UsbDataMode = UsbDataMode.DEFAULT,
     /** Settings.Global circa_auto_reboot_ms (0 = off). */
@@ -158,6 +167,9 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
             sleepTracking = ProfileModel.sleepTrackingOn(
                 getRaw(SettingKey(SettingsTable.SECURE, ProfileKeys.SLEEP_TRACKING)),
             ),
+            hrHighBpm = HeartAlertSettings.high(secure(HealthKeys.HR_HIGH_BPM)),
+            hrLowBpm = HeartAlertSettings.low(secure(HealthKeys.HR_LOW_BPM)),
+            phoneLeftAlert = PhoneLeftAlertSetting.on(secure(HealthKeys.PHONE_LEFT_ALERT)),
             usbData = UsbDataMode.parse(global(ProfileKeys.USB_DATA)),
             autoRebootMs = AutoReboot.parse(global(AutoReboot.KEY)),
             wifiAutoOffMs = WifiAutoOff.parse(global(WifiAutoOff.KEY)),
@@ -269,6 +281,17 @@ class SystemSettings(private val context: Context, private val quick: QuickSetti
 
     fun setSleepTracking(on: Boolean): Boolean =
         runCatching { Settings.Secure.putInt(resolver, ProfileKeys.SLEEP_TRACKING, if (on) 1 else 0) }.getOrDefault(false)
+
+    /** Heart-rate alert thresholds: 0 = off (WatchLink's own default when the key is absent). */
+    fun setHrHighBpm(bpm: Int): Boolean =
+        putRaw(SettingKey(SettingsTable.SECURE, HealthKeys.HR_HIGH_BPM), Math.max(0, bpm).toString())
+
+    fun setHrLowBpm(bpm: Int): Boolean =
+        putRaw(SettingKey(SettingsTable.SECURE, HealthKeys.HR_LOW_BPM), Math.max(0, bpm).toString())
+
+    fun setPhoneLeftAlert(on: Boolean): Boolean =
+        runCatching { Settings.Secure.putInt(resolver, HealthKeys.PHONE_LEFT_ALERT, if (on) 1 else 0) }
+            .getOrDefault(false)
 
     fun setLongPress(action: LongPressAction): Boolean =
         runCatching { Settings.Global.putString(resolver, ProfileKeys.LONG_PRESS, action.value) }.getOrDefault(false)

@@ -68,6 +68,7 @@ import kotlinx.coroutines.delay
 const val HEALTH_TILE_TAG = "tile_health"
 const val SHORTCUTS_TILE_TAG = "tile_shortcuts"
 const val HEALTH_EMPTY_TAG = "tile_health_empty"
+const val HEALTH_RESTING_TAG = "tile_health_resting"
 const val HEALTH_SLEEP_TAG = "tile_health_sleep"
 const val MEDIA_TILE_TAG = "tile_media"
 const val MEDIA_TITLE_TAG = "media_title"
@@ -94,6 +95,7 @@ fun HealthTile(controller: LauncherController) {
     val history = health.history.map { it.bpm }
     val steps = health.stepsToday
     val sleep = health.lastSleep
+    val restingLine = HealthMapping.restingLine(health.restingHr, health.restingHr7d)
     val accent = MaterialTheme.colorScheme.primary
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -114,38 +116,49 @@ fun HealthTile(controller: LauncherController) {
             Spacer(Modifier.size(4.dp))
             Text("Heart rate", color = accent, fontSize = 14.sp, maxLines = 1)
         }
-        Box(Modifier.height(58.dp), contentAlignment = Alignment.Center) {
-            if (hr != null) {
-                Row(verticalAlignment = Alignment.Bottom) {
+        Box(Modifier.height(if (restingLine != null) 74.dp else 58.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (hr != null) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = hr.toString(),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 52.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = " bpm",
+                            color = dim,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(bottom = 10.dp),
+                        )
+                    }
+                } else {
+                    val reachable = controller.healthProviderReachable.value
                     Text(
-                        text = hr.toString(),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 52.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = " bpm",
-                        color = dim,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(bottom = 10.dp),
+                        HealthData.emptyHeartRateText(reachable),
+                        color = dim.copy(alpha = NO_DATA_ALPHA),
+                        fontSize = if (reachable) 19.sp else 15.sp,
+                        fontWeight = FontWeight.Light,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        modifier = Modifier.padding(horizontal = 28.dp).testTag(HEALTH_EMPTY_TAG),
                     )
                 }
-            } else {
-                val reachable = controller.healthProviderReachable.value
-                Text(
-                    HealthData.emptyHeartRateText(reachable),
-                    color = dim.copy(alpha = NO_DATA_ALPHA),
-                    fontSize = if (reachable) 19.sp else 15.sp,
-                    fontWeight = FontWeight.Light,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    modifier = Modifier.padding(horizontal = 28.dp).testTag(HEALTH_EMPTY_TAG),
-                )
+                if (restingLine != null) {
+                    Text(
+                        text = restingLine,
+                        color = dim,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        modifier = Modifier.testTag(HEALTH_RESTING_TAG),
+                    )
+                }
             }
         }
         SparklineChart(history, modifier = Modifier.size(width = 112.dp, height = 28.dp))
-        Spacer(Modifier.height(if (sleep != null) 8.dp else 14.dp))
+        Spacer(Modifier.height(if (restingLine != null) 0.dp else if (sleep != null) 8.dp else 14.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.alpha(if (steps != null) 1f else NO_DATA_ALPHA),

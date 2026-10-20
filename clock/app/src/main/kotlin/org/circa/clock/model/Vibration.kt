@@ -13,9 +13,13 @@ object Alert {
      * Follow the system ringer mode: normal = sound and vibration, vibrate = vibration, silent = vibration
      * only (an alarm must not be missed because the watch is on silent). Total-silence DND
      * (INTERRUPTION_FILTER_NONE, which blocks even alarms) removes the sound; vibration stays.
+     *
+     * [dndAllowsAlarms]: Do Not Disturb is on with a policy that lets alarms through (priority with alarms
+     * allowed, or alarms only - Bedtime's). DND reports the ringer as silent then (the external ringer mode),
+     * which must not mute the alarm: it rings with sound as the policy says.
      */
-    fun plan(ringerMode: Int, totalSilence: Boolean): AlertPlan = AlertPlan(
-        sound = ringerMode == RINGER_NORMAL && !totalSilence,
+    fun plan(ringerMode: Int, totalSilence: Boolean, dndAllowsAlarms: Boolean = false): AlertPlan = AlertPlan(
+        sound = !totalSilence && (ringerMode == RINGER_NORMAL || dndAllowsAlarms),
         vibrate = true,
     )
 

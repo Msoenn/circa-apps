@@ -59,6 +59,29 @@ class HealthMappingTest {
         assertEquals(emptyList<HrSample>(), HealthMapping.latest(LatestRow(null, null, null, null)).history)
     }
 
+    @Test
+    fun restingValuesComeFromTheLatestRow() {
+        val data = HealthMapping.latest(
+            LatestRow(hrBpm = 72, hrTimeMs = 5, stepsToday = 1, stepsTimeMs = 5, restingHr = 58, restingHr7d = 60),
+        )
+        assertEquals(58, data.restingHr)
+        assertEquals(60, data.restingHr7d)
+        val none = HealthMapping.latest(LatestRow(hrBpm = 72, hrTimeMs = 5, stepsToday = 1, stepsTimeMs = 5))
+        assertNull(none.restingHr)
+        assertNull(none.restingHr7d)
+        assertNull(HealthData.EMPTY.restingHr)
+        assertNull(HealthData.EMPTY.restingHr7d)
+    }
+
+    @Test
+    fun restingLineShowsOnlyTheKnownParts() {
+        assertEquals("Resting 58 · 7-day 60", HealthMapping.restingLine(58, 60))
+        assertEquals("Resting 58", HealthMapping.restingLine(58, null))
+        assertEquals("7-day 60", HealthMapping.restingLine(null, 60))
+        assertNull(HealthMapping.restingLine(null, null))
+        assertNull(HealthMapping.restingLine(0, 0))
+    }
+
     // ---- /history -> model ---------------------------------------------------------------------
 
     @Test

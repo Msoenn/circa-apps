@@ -73,8 +73,17 @@ enum class SettingsPage(val id: String, val title: String, val parent: SettingsP
     PROFILE_SEX("profile_sex", "Sex", PROFILE),
     PROFILE_MAX_HR("profile_max_hr", "Max heart rate", PROFILE),
     PROFILE_MAX_HR_VALUE("profile_max_hr_value", "Max heart rate", PROFILE_MAX_HR),
+    // ---- WatchLink's health alerts (2026-10-19), under the Profile page where its other toggles live ----
+    HR_ALERTS("hr_alerts", "Heart rate alerts", PROFILE),
+    HR_HIGH("hr_high", "High", HR_ALERTS),
+    HR_LOW("hr_low", "Low", HR_ALERTS),
     BUTTONS("buttons", "Buttons", MAIN),
-    SIDE_LONG_PRESS("side_long_press", "Long press", BUTTONS); // "Side long press" wrapped in the header
+    SIDE_LONG_PRESS("side_long_press", "Long press", BUTTONS), // "Side long press" wrapped in the header
+    // ---- Bedtime (2026-10-19, BedtimePages.kt; also the Bedtime tile's long press) ----
+    BEDTIME("bedtime", "Bedtime", SOUND),
+    /** Start or end time (pageArg = "start" / "end"). */
+    BEDTIME_TIME("bedtime_time", "Bedtime", BEDTIME),
+    BEDTIME_DAYS("bedtime_days", "Days", BEDTIME);
 
     /** Pages from [MAIN] down to this one, for tests and for "how deep am I". */
     val depth: Int get() = generateSequence(this) { it.parent }.count() - 1

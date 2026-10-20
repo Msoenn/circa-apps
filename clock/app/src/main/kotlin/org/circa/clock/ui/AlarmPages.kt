@@ -136,6 +136,16 @@ internal fun AlarmEditPage(m: ClockModel, id: Int, is24h: Boolean) {
                 secondaryLabel = { Text("${a.snoozeMinutes} min", maxLines = 1) },
             )
         }
+        item(key = "smart_wake") {
+            SwitchButton(
+                checked = a.smartWake,
+                onCheckedChange = { on -> m.updateAlarm(id) { it.copy(smartWake = on) } },
+                modifier = Modifier.fillMaxWidth().heightIn(min = ROW_MIN_HEIGHT).transformedHeight(this, spec).testTag("edit_smart_wake"),
+                transformation = SurfaceTransformation(spec),
+                label = { Text("Smart Wake", maxLines = 1) },
+                secondaryLabel = { Text("Up to 30 min early in light sleep", maxLines = 2) },
+            )
+        }
         item(key = "delete") {
             FilledTonalButton(
                 onClick = { m.deleteAlarm(id); m.pop() },

@@ -27,6 +27,12 @@ This app only writes the keys; the framework reads and applies them.
 | Random Wi-Fi address | `Settings.Global non_persistent_mac_randomization_force_enabled` | 1 = on; unset/other = off (Circa default 1) |
 | Background scanning | `Settings.Global wifi_scan_always_enabled` and `ble_scan_always_enabled` | on only when both are 1; otherwise off |
 | Scramble PIN pad | LineageSettings.System `lockscreen_scramble_pin_layout` | 0/1, via the `lineagesettings` provider (row hidden without it) |
+| Heart rate alerts (high) | `Settings.Secure circa_hr_high_bpm` | unset = 120 bpm, 0 = off (WatchLink alerts the user) |
+| Heart rate alerts (low) | `Settings.Secure circa_hr_low_bpm` | unset = 40 bpm, 0 = off (WatchLink alerts the user) |
+| Phone left behind alert | `Settings.Secure circa_phone_left_alert` | unset/1 = on, 0 = off |
+
+The two heart-rate alert thresholds live on the Profile page ("Heart rate alerts", with High and Low radio pages);
+the phone-left-behind toggle is on the Connectivity page. WatchLink reads the keys and posts the notifications.
 
 Auto restart and Scramble PIN pad are disabled until a PIN is set. A one-shot migration, guarded by
 `Settings.Global circa_privacy_defaults_v1`, gives existing watches the privacy defaults (internet check off,

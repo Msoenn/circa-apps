@@ -35,6 +35,10 @@ object Days {
 /**
  * One alarm. [snoozedUntil] (epoch millis) is independent of [enabled]: a one-shot alarm switches itself
  * off when it fires, but a snooze of it still has to ring.
+ *
+ * [smartWake]: may ring up to [SmartWake.WINDOW_MS] early when WatchLink sees the wearer stir (light sleep);
+ * the alarm at the set time stays armed regardless. [smartRangAt] is the occurrence (epoch millis) that
+ * already rang early, so it does not ring again at its set time.
  */
 data class Alarm(
     val id: Int,
@@ -45,6 +49,8 @@ data class Alarm(
     val enabled: Boolean = true,
     val snoozeMinutes: Int = DEFAULT_SNOOZE_MIN,
     val snoozedUntil: Long? = null,
+    val smartWake: Boolean = false,
+    val smartRangAt: Long? = null,
 ) {
     companion object {
         const val DEFAULT_SNOOZE_MIN = 10
@@ -68,8 +74,9 @@ object AlarmLogic {
         repeat(8) {
             val matches = alarm.days and Days.ALL == 0 || Days.has(alarm.days, date.dayOfWeek)
             if (matches) {
-                val at = ZonedDateTime.of(LocalDateTime.of(date, time), zone)
-                if (at.toInstant().toEpochMilli() > nowMillis) return at.toInstant().toEpochMilli()
+                val at = ZonedDateTime.of(LocalDateTime.of(date, time), zone).toInstant().toEpochMilli()
+                // An occurrence Smart Wake already rang early is spent.
+                if (at > nowMillis && at != alarm.smartRangAt) return at
             }
             date = date.plusDays(1)
         }
@@ -90,6 +97,28 @@ object AlarmLogic {
     /** State of [alarm] right after it rang: the snooze is spent and a one-shot switches off. */
     fun afterFire(alarm: Alarm): Alarm =
         alarm.copy(snoozedUntil = null, enabled = alarm.enabled && alarm.days and Days.ALL != 0)
+
+    /**
+     * The Smart Wake watch to arm: the earliest alarm with [Alarm.smartWake] whose next regular occurrence
+     * is not yet [SmartWake.WINDOW_MS] past, as (alarm, occurrence). Its window opens at
+     * `occurrence - WINDOW_MS` (or now, when that has passed). Snoozes never ring early.
+     */
+    fun nextSmartWake(alarms: List<Alarm>, nowMillis: Long, zone: ZoneId): Pair<Alarm, Long>? =
+        alarms.filter { it.smartWake }
+            .mapNotNull { a -> nextRegular(a, nowMillis, zone)?.let { a to it } }
+            .minByOrNull { it.second }
+
+    /**
+     * Whether a Smart Wake callback for occurrence [at] of [alarm] may ring now: the alarm still wants Smart
+     * Wake, [at] is still its next occurrence, inside the window and at least [SmartWake.MIN_LEAD_MS] early
+     * (later than that, the alarm at the set time rings anyway).
+     */
+    fun smartWakeMayRing(alarm: Alarm, at: Long, nowMillis: Long, zone: ZoneId): Boolean =
+        alarm.smartWake && alarm.enabled && nextRegular(alarm, nowMillis, zone) == at &&
+            nowMillis >= at - SmartWake.WINDOW_MS && nowMillis <= at - SmartWake.MIN_LEAD_MS
+
+    /** State after Smart Wake rang occurrence [at] early: like [afterFire], and [at] is spent. */
+    fun afterSmartWake(alarm: Alarm, at: Long): Alarm = afterFire(alarm.copy(smartRangAt = at))
 
     /** State after Snooze pressed at [nowMillis]: rings again [Alarm.snoozeMinutes] later. */
     fun snooze(alarm: Alarm, nowMillis: Long): Alarm =
@@ -119,7 +148,7 @@ object AlarmLogic {
 object AlarmCodec {
     fun encode(alarms: List<Alarm>): String = alarms.joinToString("\n") { a ->
         listOf(a.id, a.hour, a.minute, a.days, if (a.enabled) 1 else 0, a.snoozeMinutes, a.snoozedUntil ?: 0,
-            URLEncoder.encode(a.label, "UTF-8")).joinToString("\t")
+            URLEncoder.encode(a.label, "UTF-8"), if (a.smartWake) 1 else 0, a.smartRangAt ?: 0).joinToString("\t")
     }
 
     fun decode(text: String?): List<Alarm> = text.orEmpty().lines().mapNotNull { line ->
@@ -131,7 +160,28 @@ object AlarmCodec {
                 days = f[3].toInt() and Days.ALL, enabled = f[4] == "1",
                 snoozeMinutes = f[5].toInt().coerceIn(1, 60), snoozedUntil = f[6].toLong().takeIf { it > 0 },
                 label = URLDecoder.decode(f[7], "UTF-8"),
+                // Fields 9 and 10 came with Smart Wake; older lines have 8.
+                smartWake = f.getOrNull(8) == "1",
+                smartRangAt = f.getOrNull(9)?.toLongOrNull()?.takeIf { it > 0 },
             )
         }.getOrNull()
     }
+}
+
+/** Smart Wake (docs/watch-ui/circa/bedtime.md): the window and the contract with WatchLink. */
+object SmartWake {
+    /** How early an alarm may ring. */
+    const val WINDOW_MS = 30 * 60_000L
+
+    /** A trigger later than this before the set time is ignored: the regular alarm is about to ring. */
+    const val MIN_LEAD_MS = 60_000L
+
+    /** To WatchLink: watch for light sleep until [EXTRA_DEADLINE], then fire [EXTRA_CALLBACK]. */
+    const val ACTION_REQUEST = "org.circa.watchlink.action.SMART_WAKE"
+
+    /** To WatchLink: stop watching (no extras). */
+    const val ACTION_CANCEL = "org.circa.watchlink.action.SMART_WAKE_CANCEL"
+    const val EXTRA_DEADLINE = "deadline"
+    const val EXTRA_CALLBACK = "callback"
+    const val WATCHLINK_PACKAGE = "org.circa.watchlink"
 }

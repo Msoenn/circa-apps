@@ -21,6 +21,11 @@ class Store(context: Context) {
         get() = AlarmCodec.decode(prefs.getString("alarms", ""))
         set(v) { prefs.edit().putString("alarms", AlarmCodec.encode(v)).commit() }
 
+    /** The occurrence (epoch millis) WatchLink was last asked to watch for Smart Wake; 0 = none. */
+    var smartRequestedAt: Long
+        get() = prefs.getLong("smartRequestedAt", 0L)
+        set(v) { prefs.edit().putLong("smartRequestedAt", v).commit() }
+
     var timer: TimerState
         get() = TimerState.decode(prefs.getString("timer", null))
         set(v) { prefs.edit().putString("timer", v.encode()).commit() }

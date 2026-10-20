@@ -51,6 +51,8 @@ class HealthProvider : ContentProvider() {
                             COL_HR_TIME_MS -> hr?.timeMs
                             COL_STEPS_TODAY -> snap.stepsToday() ?: 0L
                             COL_STEPS_TIME_MS -> snap.stepsTimeMs()
+                            COL_RESTING_HR -> HealthStore.restingHr()
+                            COL_RESTING_HR_7D -> HealthStore.restingHr7d()
                             else -> null
                         }
                     }.toTypedArray()
@@ -156,6 +158,8 @@ class HealthProvider : ContentProvider() {
         const val COL_HR_TIME_MS = "hr_time_ms"
         const val COL_STEPS_TODAY = "steps_today"
         const val COL_STEPS_TIME_MS = "steps_time_ms"
+        const val COL_RESTING_HR = "resting_hr"
+        const val COL_RESTING_HR_7D = "resting_hr_7d"
         const val COL_TIME_MS = "time_ms"
         const val COL_BPM = "bpm"
         const val COL_SLEEP_START_MS = "sleep_start_ms"
@@ -163,7 +167,7 @@ class HealthProvider : ContentProvider() {
         const val COL_SLEEP_MINUTES = "sleep_minutes"
 
         @JvmField val DEFAULT_LATEST_COLUMNS =
-            listOf(COL_HR_BPM, COL_HR_TIME_MS, COL_STEPS_TODAY, COL_STEPS_TIME_MS)
+            listOf(COL_HR_BPM, COL_HR_TIME_MS, COL_STEPS_TODAY, COL_STEPS_TIME_MS, COL_RESTING_HR, COL_RESTING_HR_7D)
         @JvmField val DEFAULT_HISTORY_COLUMNS = listOf(COL_TIME_MS, COL_BPM)
         @JvmField val DEFAULT_SLEEP_COLUMNS = listOf(COL_SLEEP_START_MS, COL_SLEEP_END_MS, COL_SLEEP_MINUTES)
 

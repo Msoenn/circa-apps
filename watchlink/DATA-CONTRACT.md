@@ -8,6 +8,9 @@ two content providers:
 - `content://org.circa.watchlink.data/…`: phone data (status, weather, media, agenda, navigation) and two commands
   (media controls, find my phone), for the launcher and Circa Companion.
 
+Phone notifications are posted as ordinary Android notifications with their Reply and action buttons (see
+"Notifications: replies and actions").
+
 This file is the contract between WatchLink (producer) and the apps (consumers).
 
 ## Gadgetbridge Bangle.js messages
@@ -36,6 +39,49 @@ Watch to phone, as JSON lines framed like a Bangle.js (`\r\n{json}\r\n`):
 | `{"t":"weather","v":2,"f":true}` | request the weather with forecast. Sent 2 s after every connect and then hourly while linked. |
 | `{"t":"force_calendar_sync","ids":[...]}` | the answer to `force_calendar_sync_start`. |
 | `{"t":"act","ts":ms,"stp":n,"hrm":bpm[,"act":KIND]}` | one 10-minute activity sample (`ts` = end of the bucket), pushed live and in `actfetch` backfills. `act` is a Gadgetbridge `ActivityKind` name: the running workout's kind, or `LIGHT_SLEEP` / `AWAKE_SLEEP` from sleep tracking; absent = plain activity. Gadgetbridge keeps the kind a sample first arrives with, so a sample that may be sleep is held back (at most 60 min) until its label is final. |
+
+## Notifications: replies and actions
+
+Checked against Gadgetbridge master (2026-10-19): `BangleJSDeviceSupport.onNotification` / `handleNotificationControl`
+/ `onSetCannedMessages`, `GBDeviceEventNotificationControl`, `NotificationListener`, `DeviceActionHandler`.
+
+Phone to watch:
+
+| `t` | fields | notes |
+|---|---|---|
+| `notify` | `id`, `src`, `title`, `subject`, `body`, `sender`, `tel`, plus **`reply:true`** and **`actions:[{title}]`** | `reply` only when the phone notification has a *WearableExtender* action with a RemoteInput. `actions` = the WearableExtender's simple actions, or the plain simple actions when it has none; titles cropped to 40 chars; **the array position is the index** sent back. A plain action with a RemoteInput is neither flagged nor listed. |
+| `notify-` | `id` | Removed on the phone. |
+| `canned_responses_sync` | `d:[{text, disp?}]` | The canned replies of the device settings. Sent **only when the user taps "Send"** there (not on connect), so WatchLink stores them (SharedPreferences `notif`). `disp` exists only with "Text as bitmaps" on and is ignored. GB's call-reject messages "Send" uses the same message and would replace the list. |
+
+Watch to phone:
+
+| message | meaning |
+|---|---|
+| `{"t":"notify","n":"OPEN"\|"DISMISS","id":id}` | card tapped / dismissed (unchanged). |
+| `{"t":"notify","n":"REPLY","id":id,"msg":text}` | GB fills `msg` into the app's own RemoteInput and fires it, so it works for Messages, Signal, WhatsApp, Gmail. GB appends the device setting `canned_reply_suffix`. **Never with `tel`**: with it GB sends an SMS to that number itself (`SmsManager`). For an SMS notification GB has a sender number for, GB replies by SMS anyway. |
+| `{"t":"notify","n":"INVOKE_ACTION","id":id,"action":index}` | fires the phone action at `index` of the `actions` array. |
+
+How WatchLink posts it (`NotifActions.kt`, host-tested in `NotifActionsTest.java`): a "Reply" `Notification.Action`
+first (`SEMANTIC_ACTION_REPLY`, a `RemoteInput` with the canned replies as choices and free-form input; a mutable
+PendingIntent to the service), then GB's actions in GB's order (immutable). Any Android UI can use them; on Circa the
+tray, the heads-up card and the reply screen do (`docs/watch-ui/circa/shade.md`, "Notification actions"). Until GB
+has sent canned replies (or after an empty list), the defaults are OK, Yes, No, On my way, Can't talk now, Call you
+later, Thanks. Reply text is logged only as its length (`setprop log.tag.WatchLink DEBUG` logs the whole line as
+`OUT.full`). Not connected: the card is reposted silently with "Not sent: phone not connected" and keeps its
+buttons. The watch's copy is removed only by GB's `notify-` (decision 2026-10-19), never optimistically.
+
+Limits on the phone side, and what WatchLink does about them:
+
+- GB keeps reply handles and action handles in two `LimitedQueue(16)`s keyed by notification id (the reply queue
+  takes a slot per post and is never cleaned by id). An evicted handle makes REPLY / INVOKE_ACTION fail silently
+  (a warning in GB's log only). `GbHandles` mirrors both queues; when GB would evict a notification's handles,
+  WatchLink reposts it silently without the dead buttons (1.5 s later and at most 3 per run: NotificationManagerService
+  sheds an app's posts beyond about 5 per second, and evictions come in bursts).
+- The queues live in the device-support object. GB reuses it across reconnects when it can (`canReconnect`) and
+  makes a new one after an explicit disconnect or a GB restart; then the old buttons die silently too. Not mirrored.
+- **GB bug (SMS):** INVOKE_ACTION becomes a REPLY event without text. For an SMS notification GB has a sender number
+  for, that ends in `SmsManager.sendTextMessage(number, null)` instead of firing the action. So WatchLink offers no
+  action buttons on a notification with `tel` (Reply stays).
 
 Interpretation: v1 weather has no forecast; the forecast only comes through v2 and only when asked. The v2 daily
 arrays have no dates: WatchLink numbers the days from local midnight tomorrow. v2 condition codes are Gadgetbridge's
@@ -109,6 +155,8 @@ on it. The Bangle.js device type supports weather, calendar, music info, navigat
 | `hr_time_ms` | INTEGER | Time of that reading (ms since epoch, WatchLink's clock). Null when `hr_bpm` is null. |
 | `steps_today` | INTEGER | Steps since local midnight (step counter). 0 when the counter has not been read yet. |
 | `steps_time_ms` | INTEGER | Time of the last step observation. Null before the first observation. |
+| `resting_hr` | INTEGER | Today's resting heart rate: the 10th percentile of today's scheduled HR samples taken while the covering 10-minute bucket had fewer than 30 steps. Null until there are 6 such samples (and after local midnight until the new day has 6). |
+| `resting_hr_7d` | INTEGER | Mean of the daily `resting_hr` values known in the last 7 local days, today included when known, rounded. Null when no day in that window has a value. |
 
 ### `/history`: 0..N rows, oldest first
 
@@ -124,6 +172,13 @@ Sampling: a heart-rate sample every 5 minutes (an exact alarm opens a short meas
 the screen is on (not in theater mode). Steps since local midnight: the baseline is re-taken when the local date
 changes or the counter goes backwards (reboot), and persisted so a restart within the day keeps the count. Timestamps
 use WatchLink's clock: the phone-synced time once Gadgetbridge has sent `setTime`, the watch clock before that.
+
+Resting heart rate uses only the scheduled 5-minute samples, not the live screen-on readings. The daily values (14
+days) and today's in-progress samples are persisted with the other health state, so a service restart keeps them.
+`circa_hr_high_bpm` and `circa_hr_low_bpm` (Settings.Secure) select the heart-rate alert thresholds; either can be 0
+to disable one alert. `circa_phone_left_alert` (Settings.Secure) disables the phone-left-behind alert. WatchLink
+notifies the `latest` and `history` URIs on the existing HR/steps throttle; consumers re-read rather than count
+callbacks.
 
 ### `/sleep`: zero or one row
 
@@ -203,6 +258,16 @@ this exact line (`PhoneDataTest.DOC_V2_LINE`).
 A nav line goes to the running service (which stores the route and runs the turn alert) and is only stored when no
 service is running; a blank `{"t":"nav"}` ends the route. `--ez connected true|false` fakes the `/status` link flag
 (nothing else) for testing "connected" screens.
+
+Notification lines (`notify`, `notify-`, `canned_responses_sync`) go to the running service, which posts the real
+notification with its buttons. A tapped Reply or action is then logged, as nothing is linked, as
+`user action on watch notification id=1234 -> {"t":"notify","n":"REPLY","id":1234,"msg":"<9 chars>"} dropped (not connected)`:
+
+```
+--es line '{"t":"notify","id":1234,"src":"Messages","title":"Alice","body":"Lunch at 1?","reply":true,"actions":[{"title":"Mark as read"},{"title":"Mute"}]}'
+--es line '{"t":"canned_responses_sync","d":[{"text":"On my way"},{"text":"Running late"}]}'
+--es line '{"t":"notify-","id":1234}'
+```
 
 `--es sleep_replay night` (or a spec such as `'23:00;W*2;S*30;T;S*10;W*3'`) runs a synthetic night through the sleep
 tracker and logs the `act` lines it would send as `OUT.debug ...`; nothing is stored or sent (see `SleepReplay`).

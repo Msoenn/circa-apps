@@ -107,6 +107,9 @@ class SettingsController(context: Context, private val finish: () -> Unit) {
     fun setLongPress(action: LongPressAction) = change { setLongPress(action) }
     fun setAutoDetect(on: Boolean) = change { setAutoDetect(on) }
     fun setSleepTracking(on: Boolean) = change { setSleepTracking(on) }
+    fun setHrHighBpm(bpm: Int) = change { setHrHighBpm(bpm) }
+    fun setHrLowBpm(bpm: Int) = change { setHrLowBpm(bpm) }
+    fun setPhoneLeftAlert(on: Boolean) = change { setPhoneLeftAlert(on) }
     fun setUsbData(mode: UsbDataMode) = change { setUsbData(mode) }
     fun setAutoReboot(ms: Long) = change { setAutoReboot(ms) }
     fun setWifiAutoOff(ms: Long) = change { setWifiAutoOff(ms) }

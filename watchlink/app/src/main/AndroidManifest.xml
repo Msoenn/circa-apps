@@ -96,6 +96,14 @@
             android:exported="true"
             android:enabled="true"
             android:grantUriPermissions="false" />
+        <!-- Smart Wake requests from Circa Clock (SmartWakeReceiver checks the callback's creator). -->
+        <receiver android:name=".SmartWakeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.circa.watchlink.action.SMART_WAKE" />
+                <action android:name="org.circa.watchlink.action.SMART_WAKE_CANCEL" />
+            </intent-filter>
+        </receiver>
         <!-- Test hook: feed a Gadgetbridge line into the same parser as BLE input. DUMP is held by the adb shell only. -->
         <receiver android:name=".DebugGbLineReceiver"
             android:exported="true"

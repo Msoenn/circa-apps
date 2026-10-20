@@ -162,9 +162,15 @@ fun SettingsScreen(controller: SettingsController) {
         SettingsPage.PROFILE_VALUE, SettingsPage.PROFILE_MAX_HR_VALUE -> ProfileValuePage(controller, page)
         SettingsPage.PROFILE_SEX -> ProfileSexPage(controller)
         SettingsPage.PROFILE_MAX_HR -> ProfileMaxHrPage(controller)
+        SettingsPage.HR_ALERTS -> HeartAlertsPage(controller)
+        SettingsPage.HR_HIGH -> HeartHighPage(controller)
+        SettingsPage.HR_LOW -> HeartLowPage(controller)
         SettingsPage.BUTTONS -> ButtonsPage(controller)
         SettingsPage.SIDE_LONG_PRESS -> SideLongPressPage(controller)
         SettingsPage.PIN_NEW, SettingsPage.PIN_CHANGE, SettingsPage.PIN_REMOVE -> PinPage(controller)
+        SettingsPage.BEDTIME -> BedtimePage(controller)
+        SettingsPage.BEDTIME_TIME -> BedtimeTimePage(controller)
+        SettingsPage.BEDTIME_DAYS -> BedtimeDaysPage(controller)
         SettingsPage.RESTART -> ConfirmPage(controller, page, "Restart watch?", CircaSymbols.Filled.RestartAlt) {
             controller.systemSettings.reboot()
         }
@@ -385,6 +391,11 @@ private fun ConnectivityPage(c: SettingsController) = ListPage(c, SettingsPage.C
         CircaSymbols.Outlined.BluetoothSearching,
         secondary = "Scans for location while Wi-Fi and Bluetooth are off",
     ) { c.setBackgroundScanning(it) }
+    toggleRow(
+        "phone_left_alert", spec, "Phone left behind alert", s.phoneLeftAlert,
+        CircaSymbols.Outlined.Smartphone,
+        secondary = "Buzz if you walk away from your phone",
+    ) { c.setPhoneLeftAlert(it) }
     navRow("usb_data", spec, "USB data", CircaSymbols.Outlined.Computer, secondary = s.usbData.label) {
         c.openSettingsPage(SettingsPage.USB_DATA)
     }
@@ -487,6 +498,7 @@ private fun SoundPage(c: SettingsController) = ListPage(c, SettingsPage.SOUND) {
     toggleRow("touch_vibration", spec, "Touch vibration", s.touchVibration, CircaSymbols.Outlined.Vibration) {
         c.setTouchVibration(it)
     }
+    navRow("bedtime", spec, "Bedtime", CircaSymbols.Outlined.Bedtime) { c.openSettingsPage(SettingsPage.BEDTIME) }
 }
 
 @Composable

@@ -3,7 +3,9 @@ package org.circa.clock.data
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import org.circa.clock.model.AlarmLogic
+import java.time.ZoneId
 import org.circa.clock.model.TimerPhase
 
 /**
@@ -12,6 +14,10 @@ import org.circa.clock.model.TimerPhase
  * an app update.
  */
 class ClockReceiver : BroadcastReceiver() {
+    private companion object {
+        const val TAG = "CircaClock"
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val ctx = context.applicationContext ?: context
         val store = Store(ctx)
@@ -25,6 +31,30 @@ class ClockReceiver : BroadcastReceiver() {
                     Scheduler.rescheduleAlarms(ctx)
                     RingService.start(ctx, id)
                 } else Scheduler.rescheduleAlarms(ctx)
+            }
+            Scheduler.ACTION_SMART_WINDOW -> {
+                val id = intent.getIntExtra(Scheduler.EXTRA_ID, -1)
+                val at = intent.getLongExtra(Scheduler.EXTRA_AT, 0L)
+                val a = store.alarms.firstOrNull { it.id == id }
+                if (a != null && a.smartWake && AlarmLogic.nextRegular(a, System.currentTimeMillis(), ZoneId.systemDefault()) == at) {
+                    Scheduler.requestSmartWake(ctx, id, at)
+                } else Scheduler.rescheduleAlarms(ctx)
+            }
+            Scheduler.ACTION_SMART_WAKE -> {
+                // WatchLink saw the wearer stir inside the window (it fires the PendingIntent Clock gave it).
+                val id = intent.getIntExtra(Scheduler.EXTRA_ID, -1)
+                val at = intent.getLongExtra(Scheduler.EXTRA_AT, 0L)
+                val now = System.currentTimeMillis()
+                val alarms = store.alarms
+                val a = alarms.firstOrNull { it.id == id }
+                if (a != null && store.ringing == Store.RING_NONE &&
+                    AlarmLogic.smartWakeMayRing(a, at, now, ZoneId.systemDefault())) {
+                    Log.i(TAG, "smart wake: alarm $id rings ${(at - now) / 60_000} min early")
+                    store.alarms = alarms.map { if (it.id == id) AlarmLogic.afterSmartWake(it, at) else it }
+                    store.smartRequestedAt = 0L
+                    Scheduler.rescheduleAlarms(ctx)
+                    RingService.start(ctx, id)
+                } else Log.i(TAG, "smart wake: callback for alarm $id at $at ignored")
             }
             Scheduler.ACTION_TIMER -> {
                 val t = store.timer

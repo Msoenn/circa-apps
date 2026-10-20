@@ -17,6 +17,9 @@ data class SleepSummary(val startMs: Long, val endMs: Long, val minutes: Int)
  *  - [stepsToday] is steps since local midnight, null until WatchLink has observed the step counter
  *    (a hard 0 would otherwise hide the launcher's own `TYPE_STEP_COUNTER` fallback);
  *  - [history] is the last 60 minutes of heart-rate samples, oldest first, for the tile's sparkline;
+ *  - [restingHr] is today's resting heart rate (10th percentile of inactive samples), null until WatchLink has six
+ *    such samples;
+ *  - [restingHr7d] is the average of the daily resting values in the last seven days, null when none is known;
  *  - [lastSleep] is the last night (or nap) WatchLink detected, null when none ended in the last 18 hours,
  *    sleep tracking is off, or WatchLink predates it.
  */
@@ -25,6 +28,8 @@ data class HealthData(
     val hrTimeMs: Long?,
     val stepsToday: Int?,
     val history: List<HrSample>,
+    val restingHr: Int? = null,
+    val restingHr7d: Int? = null,
     val lastSleep: SleepSummary? = null,
 ) {
     companion object {

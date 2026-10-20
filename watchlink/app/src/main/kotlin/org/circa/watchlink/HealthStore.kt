@@ -24,6 +24,11 @@ import android.util.Log
  * so a service restart — or a reboot — within the same day does not lose the count; the pure class carries the
  * day's steps over a reboot and re-snaps the baseline on a day change. The last counter is written at most once a
  * minute or every [PERSIST_STEP_INTERVAL] steps, plus immediately on a day change / reboot rebase and on shutdown.
+ *
+ * Resting heart rate ([RestingHr]) rides the same preferences: today's in-progress samples, the local day they
+ * belong to, and the daily values of the last 14 days. [onRestingSample] is fed by the service's scheduled HR
+ * windows; the getters do the day rollover check, so the provider shows nothing for a day with no samples even if
+ * the service has not run since midnight.
  */
 internal object HealthStore {
     private const val TAG = "WatchLink"
@@ -32,6 +37,9 @@ internal object HealthStore {
     const val KEY_BASE_TOTAL = "steps_base_total"
     const val KEY_LAST_TOTAL = "steps_last_total"
     const val KEY_BOOT_COUNT = "steps_boot_count"
+    const val KEY_RESTING_DAYS = "resting_days"
+    const val KEY_RESTING_DAY_START = "resting_day_start_ms"
+    const val KEY_RESTING_SAMPLES = "resting_samples"
 
     /** The last counter is persisted at most this often, or every [PERSIST_STEP_INTERVAL] steps, whichever first. */
     private const val PERSIST_INTERVAL_MS = 60_000L
@@ -58,6 +66,11 @@ internal object HealthStore {
     private var savedBootCount = -1
     private var lastPersistElapsed = -PERSIST_INTERVAL_MS
     private var persistAtSteps = -1L
+
+    private var restingDays: List<RestingHr.Day> = emptyList()
+    private var restingSamples: List<RestingHr.Sample> = emptyList()
+    private var restingDayStart = Long.MIN_VALUE
+    private var restingToday: Int? = null
 
     /**
      * Idempotent: the provider calls it to get a Context, the service also passes its clock. The persisted step
@@ -87,6 +100,11 @@ internal object HealthStore {
                 // Debug, not INFO: the baseline is step-counter numbers (health numbers stay out of the default log).
                 Log.d(TAG, "health: step baseline restored (day=$day base=$base last=$last boot=$boot)")
             }
+            restingDays = RestingHr.decode(np.getString(KEY_RESTING_DAYS, null))
+            restingDayStart = np.getLong(KEY_RESTING_DAY_START, Long.MIN_VALUE)
+            restingSamples = RestingHr.decodeSamples(np.getString(KEY_RESTING_SAMPLES, null))
+            restingToday = if (restingDayStart == Long.MIN_VALUE) null
+            else RestingHr.daily(restingSamples, restingDayStart)
         }
     }
 
@@ -115,9 +133,57 @@ internal object HealthStore {
         maybeNotify()
     }
 
+    /**
+     * One scheduled HR sample for resting heart rate: [bucketSteps] are the steps of the open 10-minute bucket at
+     * that moment. A new local day starts a fresh sample list; the previous day's value is already in [restingDays]
+     * because every sample updates it.
+     */
+    @Synchronized
+    fun onRestingSample(nowMs: Long, bpm: Int, bucketSteps: Int) {
+        if (bpm <= 0) return
+        val day = HealthSnapshot.localMidnight(nowMs, tzOffsetMs(nowMs))
+        if (day != restingDayStart) {
+            restingDayStart = day
+            restingSamples = emptyList()
+        }
+        restingSamples = restingSamples + RestingHr.Sample(nowMs, bpm, bucketSteps)
+        restingToday = RestingHr.daily(restingSamples, day)
+        restingDays = RestingHr.withDay(restingDays, day, restingToday)
+        val p = prefs ?: return
+        p.edit()
+            .putString(KEY_RESTING_DAYS, RestingHr.encode(restingDays))
+            .putLong(KEY_RESTING_DAY_START, restingDayStart)
+            .putString(KEY_RESTING_SAMPLES, RestingHr.encodeSamples(restingSamples))
+            .apply()
+        maybeNotify()
+    }
+
+    /** Today's resting HR (null until 6 inactive samples), or null once the stored day has passed. */
+    @Synchronized
+    fun restingHr(): Int? {
+        val now = clock()
+        val day = HealthSnapshot.localMidnight(now, tzOffsetMs(now))
+        return if (day == restingDayStart) restingToday else null
+    }
+
+    /** Average of the daily resting values in the last 7 days (today included when known), or null. */
+    @Synchronized
+    fun restingHr7d(): Int? {
+        val now = clock()
+        val day = HealthSnapshot.localMidnight(now, tzOffsetMs(now))
+        return RestingHr.sevenDay(restingDays, day)
+    }
+
     /** Write the step state now (device shutting down: the counter resets on the next boot). */
     @Synchronized
     fun flushStepState() = persistStepState(force = true)
+
+    /** Local UTC offset at [nowMs], from the watch's current zone (the service applies the phone's zone). */
+    private fun tzOffsetMs(nowMs: Long): Int = try {
+        java.util.TimeZone.getDefault().getOffset(nowMs)
+    } catch (e: Exception) {
+        0
+    }
 
     /** `Settings.Global.BOOT_COUNT`, or -1 when unknown: the caller side of the model's reboot detection. */
     private fun bootCount(): Int {

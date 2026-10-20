@@ -96,7 +96,43 @@ class ProfileModelTest {
     }
 
     @Test
+    fun heartAlertThresholdsDefaultAndTurnOff() {
+        assertEquals("circa_hr_high_bpm", HealthKeys.HR_HIGH_BPM)
+        assertEquals("circa_hr_low_bpm", HealthKeys.HR_LOW_BPM)
+        assertEquals(120, HeartAlertSettings.high(null))
+        assertEquals(120, HeartAlertSettings.high("garbage"))
+        assertEquals(130, HeartAlertSettings.high("130"))
+        assertEquals(130, HeartAlertSettings.high(" 130 "))
+        assertEquals(0, HeartAlertSettings.high("0"))
+        assertEquals(40, HeartAlertSettings.low(null))
+        assertEquals(35, HeartAlertSettings.low("35"))
+        assertEquals(0, HeartAlertSettings.low("0"))
+        assertEquals(listOf(0, 100, 110, 120, 130, 140, 150), HeartAlertSettings.HIGH_OPTIONS)
+        assertEquals(listOf(0, 35, 40, 45, 50), HeartAlertSettings.LOW_OPTIONS)
+        assertEquals("Off", HeartAlertSettings.option(0))
+        assertEquals("120 bpm", HeartAlertSettings.option(120))
+        assertEquals("High 120 · Low 40", HeartAlertSettings.summary(120, 40))
+        assertEquals("Off", HeartAlertSettings.summary(0, 0))
+        assertEquals("High off · Low 40", HeartAlertSettings.summary(0, 40))
+        assertEquals("High 120 · Low off", HeartAlertSettings.summary(120, 0))
+    }
+
+    @Test
+    fun phoneLeftAlertDefaultsToOn() {
+        assertEquals("circa_phone_left_alert", HealthKeys.PHONE_LEFT_ALERT)
+        assertEquals(true, PhoneLeftAlertSetting.on(null))
+        assertEquals(true, PhoneLeftAlertSetting.on("1"))
+        assertEquals(true, PhoneLeftAlertSetting.on("garbage"))
+        assertEquals(false, PhoneLeftAlertSetting.on("0"))
+        assertEquals(false, PhoneLeftAlertSetting.on(" 0 "))
+    }
+
+    @Test
     fun pagesHangUnderMain() {
+        assertEquals(SettingsPage.PROFILE, SettingsPage.HR_ALERTS.parent)
+        assertEquals(SettingsPage.HR_ALERTS, SettingsPage.HR_HIGH.parent)
+        assertEquals(SettingsPage.HR_ALERTS, SettingsPage.HR_LOW.parent)
+        assertEquals(SettingsPage.PROFILE, SettingsNav.back(SettingsPage.HR_ALERTS, SettingsPage.MAIN))
         assertEquals(SettingsPage.MAIN, SettingsPage.PROFILE.parent)
         assertEquals(SettingsPage.PROFILE_MAX_HR, SettingsPage.PROFILE_MAX_HR_VALUE.parent)
         assertEquals(SettingsPage.BUTTONS, SettingsPage.SIDE_LONG_PRESS.parent)

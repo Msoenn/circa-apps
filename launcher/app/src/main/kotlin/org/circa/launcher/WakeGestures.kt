@@ -84,7 +84,10 @@ class WakeGestures(private val context: Context) {
     private var tiltArmedAt: Long? = null
     private var offBodyRegistered = false
 
-    /** Cached `Settings.Global.THEATER_MODE_ON`, refreshed by [evaluate] (the observer below). */
+    /**
+     * Cached `Settings.Global.THEATER_MODE_ON` or Bedtime (`Settings.Global bedtime_mode`, the Circa
+     * shade's CircaBedtimeMode): both keep tilt-to-wake off. Refreshed by [evaluate] (the observers below).
+     */
     private var theaterModeOn = false
 
     private val telemetry = TiltTelemetry(context)
@@ -136,13 +139,16 @@ class WakeGestures(private val context: Context) {
         }
         // Theater mode (SystemUI's tile or `settings put global theater_mode_on 1`): tilt-to-wake is a
         // *wake* and must stay off while it is on - only POWER may wake the screen then.
-        resolver.registerContentObserver(
-            Settings.Global.getUriFor(THEATER_SETTING),
-            false,
-            object : ContentObserver(mainHandler) {
-                override fun onChange(selfChange: Boolean) = evaluate()
-            },
-        )
+        // Bedtime (SystemUI's tile, its schedule, Circa Settings) is the same for tilt-to-wake.
+        for (key in listOf(THEATER_SETTING, BEDTIME_SETTING)) {
+            resolver.registerContentObserver(
+                Settings.Global.getUriFor(key),
+                false,
+                object : ContentObserver(mainHandler) {
+                    override fun onChange(selfChange: Boolean) = evaluate()
+                },
+            )
+        }
         // Off or dozing vs interactive is the display state: STATE_OFF / STATE_DOZE / STATE_DOZE_SUSPEND
         // are "not interactive" (STATE_ON is), and a doze dream also reports STATE_DOZE.
         displayManager?.registerDisplayListener(
@@ -394,7 +400,10 @@ class WakeGestures(private val context: Context) {
 
     /** `Settings.Global.THEATER_MODE_ON` (hidden from the public SDK), 1 = on. */
     private fun theaterModeOn(): Boolean =
-        runCatching { Settings.Global.getInt(resolver, THEATER_SETTING, 0) == 1 }.getOrDefault(false)
+        runCatching {
+            Settings.Global.getInt(resolver, THEATER_SETTING, 0) == 1 ||
+                Settings.Global.getInt(resolver, BEDTIME_SETTING, 0) == 1
+        }.getOrDefault(false)
 
     private fun screenInteractive(): Boolean {
         val display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY) ?: return false
@@ -431,6 +440,9 @@ class WakeGestures(private val context: Context) {
 
         /** Hidden `Settings.Global.THEATER_MODE_ON`; SystemUI's Theater mode tile writes it. */
         private const val THEATER_SETTING = "theater_mode_on"
+
+        /** Settings.Global.Wearable.BEDTIME_MODE (hidden). */
+        private const val BEDTIME_SETTING = "bedtime_mode"
 
         /** Hidden `PowerManager.WAKE_REASON_GESTURE`. */
         private const val WAKE_REASON_GESTURE = 4

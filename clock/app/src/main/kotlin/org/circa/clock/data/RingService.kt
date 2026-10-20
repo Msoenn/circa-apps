@@ -92,9 +92,14 @@ class RingService : Service() {
 
         val am = getSystemService(AudioManager::class.java)
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        val total = nm.currentInterruptionFilter == android.app.NotificationManager.INTERRUPTION_FILTER_NONE
-        val plan = Alert.plan(am.ringerMode, total)
-        Log.i(TAG, "ringing id=$id ringer=${am.ringerMode} totalSilence=$total plan=$plan")
+        val filter = nm.currentInterruptionFilter
+        val total = filter == android.app.NotificationManager.INTERRUPTION_FILTER_NONE
+        val dndAlarms = filter == android.app.NotificationManager.INTERRUPTION_FILTER_ALARMS ||
+            (filter == android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY &&
+                nm.consolidatedNotificationPolicy.priorityCategories and
+                android.app.NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS != 0)
+        val plan = Alert.plan(am.ringerMode, total, dndAlarms)
+        Log.i(TAG, "ringing id=$id ringer=${am.ringerMode} totalSilence=$total dndAllowsAlarms=$dndAlarms plan=$plan")
         if (plan.sound) playSound()
         if (plan.vibrate) vibrate()
         handler.removeCallbacks(timeout)
@@ -155,7 +160,22 @@ class RingService : Service() {
         finishRinging()
     }
 
-    fun dismiss() { Log.i(TAG, "dismissed $alarmId"); finishRinging() }
+    fun dismiss() {
+        Log.i(TAG, "dismissed $alarmId")
+        if (alarmId >= 0) announceDismissed()
+        finishRinging()
+    }
+
+    /**
+     * Tells the Circa shade an alarm was dismissed (not snoozed), which ends Bedtime as on stock. It checks the
+     * sender, so the identity is shared.
+     */
+    private fun announceDismissed() {
+        runCatching {
+            val opts = android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle()
+            sendBroadcast(Intent(ACTION_ALARM_DISMISSED).setPackage(SYSTEMUI), null, opts)
+        }.onFailure { Log.w(TAG, "alarm-dismissed broadcast failed: $it") }
+    }
 
     private fun missed() {
         Notifs.missed(this, RingState.title + " " + RingState.timeText)
@@ -172,6 +192,8 @@ class RingService : Service() {
         const val EXTRA_ID = "id"
         const val EXTRA_TIMER_MS = "timerMs"
         const val RING_TIMEOUT_MS = 10 * 60_000L
+        const val ACTION_ALARM_DISMISSED = "org.circa.clock.action.ALARM_DISMISSED"
+        private const val SYSTEMUI = "com.android.systemui"
         @Volatile var instance: RingService? = null
 
         fun start(ctx: Context, id: Int, label: Long = 0) {

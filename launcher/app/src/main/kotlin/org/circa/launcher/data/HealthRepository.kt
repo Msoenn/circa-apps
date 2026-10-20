@@ -33,6 +33,8 @@ object HealthContract {
     const val COL_HR_TIME = "hr_time_ms"
     const val COL_STEPS_TODAY = "steps_today"
     const val COL_STEPS_TIME = "steps_time_ms"
+    const val COL_RESTING_HR = "resting_hr"
+    const val COL_RESTING_HR_7D = "resting_hr_7d"
     const val COL_TIME_MS = "time_ms"
     const val COL_BPM = "bpm"
     const val COL_SLEEP_START = "sleep_start_ms"
@@ -117,6 +119,9 @@ class HealthRepository(private val context: Context) {
                     hrTimeMs = c.longOrNull(1),
                     stepsToday = c.longOrNull(2),
                     stepsTimeMs = c.longOrNull(3),
+                    // An older WatchLink may still answer with the four original columns.
+                    restingHr = if (c.columnCount > 4) c.intOrNull(4) else null,
+                    restingHr7d = if (c.columnCount > 5) c.intOrNull(5) else null,
                 )
             } else {
                 null
@@ -164,6 +169,8 @@ class HealthRepository(private val context: Context) {
             HealthContract.COL_HR_TIME,
             HealthContract.COL_STEPS_TODAY,
             HealthContract.COL_STEPS_TIME,
+            HealthContract.COL_RESTING_HR,
+            HealthContract.COL_RESTING_HR_7D,
         )
         private val HISTORY_PROJECTION = arrayOf(HealthContract.COL_TIME_MS, HealthContract.COL_BPM)
         private val SLEEP_PROJECTION = arrayOf(

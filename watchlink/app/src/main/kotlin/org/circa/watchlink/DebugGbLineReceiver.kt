@@ -13,6 +13,8 @@ import android.util.Log
  *     --es line 'GB({"t":"find","n":true})'
  * A line that starts with `{` is wrapped in `GB(...)` for convenience. `--ez connected true|false` (alone or with a
  * line) sets the /status connected flag and last_seen_ms as if a GB link were up/down (no command delivery).
+ * `notify`, `notify-`, `canned_responses_sync` and `call` lines go to the running service, which posts / removes the
+ * real notification (with its Reply and action buttons, or the call's Reject / Accept) and stores the canned replies.
  * A `t=nav` line goes to the running service, which stores the route and buzzes the maneuver ([WatchLinkService.debugNav]);
  * with no service running it is only stored, like every other line.
  */
@@ -36,6 +38,14 @@ class DebugGbLineReceiver : BroadcastReceiver() {
             ExerciseLink.send(c, System.currentTimeMillis(), bpm, steps)
             Log.i(TAG, "DEBUG_GB_LINE hr_sample bpm=$bpm steps=$steps")
             resultData = "hr_sample bpm=$bpm steps=$steps"
+            return
+        }
+        // Send the shade the sleep-state broadcast a real night start / end sends (Bedtime's "start when asleep"):
+        //   --ez sleep_state true|false
+        if (i.hasExtra("sleep_state")) {
+            val asleep = i.getBooleanExtra("sleep_state", false)
+            SleepTracking.announceSleepState(c, asleep)
+            resultData = "sleep_state asleep=$asleep"
             return
         }
         // Replay a synthetic night through the sleep tracker (logged as "OUT.debug ...", nothing stored or sent):
@@ -66,6 +76,14 @@ class DebugGbLineReceiver : BroadcastReceiver() {
         if (tt == "nav" && parsed.msg?.let { WatchLinkService.debugNav(it) } == true) {
             Log.i(TAG, "DEBUG_GB_LINE t=nav service=running")
             resultData = "t=nav service=running"
+            return
+        }
+        // Notification lines post (or remove) the real notification, which only the running service does; replies and
+        // actions tapped on it are logged as "user action on watch notification ... dropped (not connected)".
+        if ((tt == "notify" || tt == "notify-" || tt == "canned_responses_sync" || tt == "call") && parsed.msg != null) {
+            val ok = WatchLinkService.debugNotify(tt, parsed.msg!!)
+            Log.i(TAG, "DEBUG_GB_LINE t=$tt service=" + (if (ok) "running" else "not running"))
+            resultData = "t=$tt service=" + (if (ok) "running" else "not running")
             return
         }
         PhoneStore.attach(c)

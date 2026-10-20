@@ -529,12 +529,17 @@ public final class HostTest {
         TrackSyncTest.run();
         BleNameTest.run();
         NotifIconTest.run();
+        // 6g3. Notification replies/actions: GB notify fields, REPLY / INVOKE_ACTION, GB handle mirror, canned replies
+        NotifActionsTest.run();
 
         // 6h. System time zone from the phone's UTC offset (GB setTime / E.setTimeZone)
         TzPolicyTest.run();
 
         // 6i. Sleep tracking: movement measures, classifier, hold-back state machine on synthetic nights
         SleepTest.run();
+        // 6j. Health alerts: heart-rate high/low, resting heart rate, phone left behind
+        HealthAlertsTest.run();
+        SmartWakeTest.run();
 
         // 7. Fuzz: random values as GB encoded them, random chunking
         int fuzz = 0;

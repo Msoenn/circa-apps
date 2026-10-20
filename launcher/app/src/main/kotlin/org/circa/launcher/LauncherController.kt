@@ -158,6 +158,8 @@ class LauncherController(private val context: Context) {
             stepsToday = demo?.stepsToday
                 ?: HealthMapping.preferredSteps(watchLink.stepsToday, sensorSteps.value),
             history = demo?.history?.takeIf { it.isNotEmpty() } ?: watchLink.history,
+            restingHr = demo?.restingHr ?: watchLink.restingHr,
+            restingHr7d = demo?.restingHr7d ?: watchLink.restingHr7d,
             lastSleep = demo?.lastSleep ?: watchLink.lastSleep,
         )
     }
@@ -291,12 +293,22 @@ class LauncherController(private val context: Context) {
     /**
      * Demo/diagnostic hook behind the DUMP-protected `DEMO_HEALTH` broadcast (see MainActivity). While
      * active these values override WatchLink's, so a screenshot can show data on an emulator with no
-     * health sensors. `--ei sleep_min N` adds a last-night sleep line. Sending `--ei hr -1 --ei steps -1`
-     * (no history, no sleep) clears the override and lets the repository show through again.
+     * health sensors. `--ei sleep_min N` adds a last-night sleep line, `--ei resting N --ei resting7 N` the tile's
+     * resting line. Sending `--ei hr -1 --ei steps -1` (no history, sleep, resting) clears the override and lets
+     * the repository show through again.
      */
-    fun setDemoHealth(heartRate: Int?, steps: Int?, history: List<Int>, sleepMinutes: Int? = null) {
+    fun setDemoHealth(
+        heartRate: Int?,
+        steps: Int?,
+        history: List<Int>,
+        sleepMinutes: Int? = null,
+        restingHr: Int? = null,
+        restingHr7d: Int? = null,
+    ) {
         demoHealth.value =
-            if (heartRate == null && steps == null && history.isEmpty() && sleepMinutes == null) {
+            if (heartRate == null && steps == null && history.isEmpty() && sleepMinutes == null &&
+                restingHr == null && restingHr7d == null
+            ) {
                 null
             } else {
                 HealthData(
@@ -305,6 +317,8 @@ class LauncherController(private val context: Context) {
                     stepsToday = steps,
                     // The demo hook carries no timestamps; the tile's sparkline draws bpm only.
                     history = history.map { HrSample(timeMs = 0L, bpm = it) },
+                    restingHr = restingHr,
+                    restingHr7d = restingHr7d,
                     lastSleep = sleepMinutes?.let { SleepSummary(startMs = 0L, endMs = it * 60_000L, minutes = it) },
                 )
             }

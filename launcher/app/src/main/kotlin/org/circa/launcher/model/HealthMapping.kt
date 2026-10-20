@@ -16,6 +16,8 @@ object HealthMapping {
         val hrTimeMs: Long?,
         val stepsToday: Long?,
         val stepsTimeMs: Long?,
+        val restingHr: Int? = null,
+        val restingHr7d: Int? = null,
     )
 
     /**
@@ -33,7 +35,28 @@ object HealthMapping {
         val hrTime = row.hrTimeMs
         val hr = row.hrBpm?.takeIf { hrTime != null }
         val steps = if (row.stepsTimeMs != null) row.stepsToday?.toStepsInt() else null
-        return HealthData(hrBpm = hr, hrTimeMs = if (hr != null) hrTime else null, stepsToday = steps, history = emptyList())
+        return HealthData(
+            hrBpm = hr,
+            hrTimeMs = if (hr != null) hrTime else null,
+            stepsToday = steps,
+            history = emptyList(),
+            restingHr = row.restingHr?.takeIf { it > 0 },
+            restingHr7d = row.restingHr7d?.takeIf { it > 0 },
+        )
+    }
+
+    /**
+     * The health tile's resting line: "Resting 58 · 7-day 60", only the known parts, or null when neither is known.
+     */
+    fun restingLine(resting: Int?, sevenDay: Int?): String? {
+        val r = resting?.takeIf { it > 0 }
+        val w = sevenDay?.takeIf { it > 0 }
+        return when {
+            r != null && w != null -> "Resting $r · 7-day $w"
+            r != null -> "Resting $r"
+            w != null -> "7-day $w"
+            else -> null
+        }
     }
 
     /** `/history` rows -> the model's sample list (oldest first, as the provider returns them). */

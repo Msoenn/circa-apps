@@ -32,6 +32,7 @@ import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import org.circa.settings.SettingsController
+import org.circa.settings.model.HeartAlertSettings
 import org.circa.settings.model.LongPressAction
 import org.circa.settings.model.ProfileField
 import org.circa.settings.model.ProfileModel
@@ -76,7 +77,39 @@ internal fun ProfilePage(c: SettingsController) = ListPage(c, SettingsPage.PROFI
         "sleep_tracking", spec, "Sleep tracking", c.settingsState.value.sleepTracking,
         CircaSymbols.Outlined.Bedtime, secondary = onOff(c.settingsState.value.sleepTracking),
     ) { c.setSleepTracking(it) }
+    val alerts = c.settingsState.value
+    navRow(
+        "hr_alerts", spec, "Heart rate alerts", CircaSymbols.Outlined.Favorite,
+        secondary = HeartAlertSettings.summary(alerts.hrHighBpm, alerts.hrLowBpm),
+    ) { c.openSettingsPage(SettingsPage.HR_ALERTS) }
     noteItem("profile_note", "Exercise uses these for calories and heart-rate zones")
+}
+
+@Composable
+internal fun HeartAlertsPage(c: SettingsController) = ListPage(c, SettingsPage.HR_ALERTS) { spec ->
+    val s = c.settingsState.value
+    navRow(
+        "hr_high", spec, "High", secondary = HeartAlertSettings.option(s.hrHighBpm),
+    ) { c.openSettingsPage(SettingsPage.HR_HIGH) }
+    navRow(
+        "hr_low", spec, "Low", secondary = HeartAlertSettings.option(s.hrLowBpm),
+    ) { c.openSettingsPage(SettingsPage.HR_LOW) }
+}
+
+@Composable
+internal fun HeartHighPage(c: SettingsController) = ListPage(c, SettingsPage.HR_HIGH) { spec ->
+    val current = c.settingsState.value.hrHighBpm
+    HeartAlertSettings.HIGH_OPTIONS.forEach { bpm ->
+        radioRow("hr_high_$bpm", spec, HeartAlertSettings.option(bpm), current == bpm) { c.setHrHighBpm(bpm) }
+    }
+}
+
+@Composable
+internal fun HeartLowPage(c: SettingsController) = ListPage(c, SettingsPage.HR_LOW) { spec ->
+    val current = c.settingsState.value.hrLowBpm
+    HeartAlertSettings.LOW_OPTIONS.forEach { bpm ->
+        radioRow("hr_low_$bpm", spec, HeartAlertSettings.option(bpm), current == bpm) { c.setHrLowBpm(bpm) }
+    }
 }
 
 @Composable

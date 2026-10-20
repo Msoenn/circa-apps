@@ -5,11 +5,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -17,6 +19,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.hardware.SensorManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
@@ -47,11 +50,34 @@ class WatchLinkService : Service(), BleServer.Listener {
     private lateinit var sleep: SleepTracking
     private lateinit var nm: NotificationManager
     private val notifyPolicy = NotifyPolicy()
+
+    /** GB's reply/action handle queues as the phone sees them (see [GbHandles]); service thread only. */
+    private val gbHandles = GbHandles()
+
+    /** The last `notify` per GB id, to repost a card without the actions GB can no longer resolve. */
+    private val lastNotify = object : LinkedHashMap<Long, Map<String, Any?>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Map<String, Any?>>?) = size > 64
+    }
     private val navAlert = NavAlert()
 
-    /** A route alert is a notification-grade buzz, not an alarm: the usage a notification's own vibration gets. */
-    private val navVibration: VibrationAttributes =
+    /** Route and health alerts are notification-grade buzzes, not alarms: the usage a notification's own vibration gets. */
+    private val notificationVibration: VibrationAttributes =
         VibrationAttributes.Builder().setUsage(VibrationAttributes.USAGE_NOTIFICATION).build()
+
+    /** The last scheduled HR samples for [HeartAlerts] (oldest first, a few minutes' worth). */
+    private val hrAlertSamples = ArrayList<HeartAlerts.Sample>()
+    private var lastHighAlertMs = 0L
+    private var lastLowAlertMs = 0L
+    private lateinit var alertPrefs: SharedPreferences
+
+    /** Gadgetbridge link state used to detect a drop (the phone-left-behind alert starts there). */
+    private var linkWasConnected = false
+    private var phoneLeftPending = false
+    private var phoneLeftFired = false
+    private var phoneLeftAt = 0L
+    private var phoneLeftStepBase = -1L
+    private var phoneLeftWorn = true
+    private var phoneLeftEnabled = false
     private lateinit var power: PowerManager
     private lateinit var wake: PowerManager.WakeLock
     private lateinit var vib: Vibrator
@@ -119,6 +145,18 @@ class WatchLinkService : Service(), BleServer.Listener {
         val c = NotificationChannel(CH_CALL, "Phone calls", NotificationManager.IMPORTANCE_HIGH)
         c.enableVibration(true)
         nm.createNotificationChannel(c)
+        // Health alerts buzz through the vibrator only when theater mode is off, so the channels carry no pattern of
+        // their own (a channel vibration would bypass that check).
+        nm.createNotificationChannel(
+            NotificationChannel(CH_HR_ALERTS, "Heart rate alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                enableVibration(false)
+            }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_PHONE_LEFT, "Phone left behind", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                enableVibration(false)
+            }
+        )
         vib = getSystemService(VibratorManager::class.java).defaultVibrator
         power = getSystemService(PowerManager::class.java)
         wake = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "watchlink:work")
@@ -270,6 +308,9 @@ class WatchLinkService : Service(), BleServer.Listener {
         // The launcher reads these through HealthProvider; the clock must be WatchLink's (phone-synced) time.
         HealthStore.attach(this) { log.now() }
         PhoneStore.attach(this) { log.now() }
+        alertPrefs = getSharedPreferences(PREFS_ALERTS, MODE_PRIVATE)
+        lastHighAlertMs = alertPrefs.getLong(KEY_LAST_HIGH, 0L)
+        lastLowAlertMs = alertPrefs.getLong(KEY_LAST_LOW, 0L)
         instance = this
         sensors = Sensors(
             getSystemService(SensorManager::class.java),
@@ -282,7 +323,10 @@ class WatchLinkService : Service(), BleServer.Listener {
                 val w = hrWindow
                 if (w != null && w.onSample(bpm, acc)) endHrWindow("reading")
             },
-            { total -> HealthStore.onSteps(log.now(), total, tzOffsetMs()) },
+            { total ->
+                HealthStore.onSteps(log.now(), total, tzOffsetMs())
+                maybePhoneLeft(total)
+            },
             { atMs ->
                 // Off-wrist the PPG reports NO_CONTACT once per window; arm the grace backstop and end the window
                 // early (reason "no-contact") if no usable reading arrives inside it (see HrWindow).
@@ -295,7 +339,12 @@ class WatchLinkService : Service(), BleServer.Listener {
             },
         )
         sensors.startSteps()
-        sleep = SleepTracking(this, getSystemService(SensorManager::class.java), h, log, ::wakeAcquire, ::wakeRelease)
+        sleep = SleepTracking(this, getSystemService(SensorManager::class.java), h, log, ::wakeAcquire, ::wakeRelease) {
+            PendingIntent.getService(
+                this, 98, Intent(this, WatchLinkService::class.java).setAction(ACTION_SMART_TICK),
+                PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
         sleep.start()
         registerReceiver(batteryRx, IntentFilter(Intent.ACTION_BATTERY_CHANGED), null, h)
         val id = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
@@ -365,6 +414,8 @@ class WatchLinkService : Service(), BleServer.Listener {
             ensureHealth("Start pressed")
         } else if (ACTION_BUCKET == a) {
             onBucketAlarm()
+        } else if (ACTION_SMART_TICK == a) {
+            if (::sleep.isInitialized) sleep.smartTick()
         } else if (ACTION_HR_SAMPLE == a) {
             onHrSampleAlarm()
         } else if (ACTION_NOTIF_OPEN == a || ACTION_NOTIF_DISMISS == a) {
@@ -373,7 +424,19 @@ class WatchLinkService : Service(), BleServer.Listener {
             m["n"] = if (ACTION_NOTIF_OPEN == a) "OPEN" else "DISMISS"
             m["id"] = id
             Log.i(TAG, "user action on watch notification id=$id -> " + m["n"])
+            if (ACTION_NOTIF_DISMISS == a) lastNotify.remove(id)
             sendAll(m)
+        } else if (ACTION_NOTIF_REPLY == a) {
+            val id = intent!!.getLongExtra("id", 0)
+            val text = NotifActions.replyText(RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY))
+            if (text == null) {
+                Log.i(TAG, "user reply on watch notification id=$id: empty, not sent")
+                return
+            }
+            deliverNotifAction(id, NotifActions.replyMsg(id, text))
+        } else if (ACTION_NOTIF_INVOKE == a) {
+            val id = intent!!.getLongExtra("id", 0)
+            deliverNotifAction(id, NotifActions.invokeMsg(id, intent.getIntExtra("index", -1)))
         } else if (ACTION_CALL_ACCEPT == a || ACTION_CALL_REJECT == a) {
             val m = msg("call")
             m["n"] = if (ACTION_CALL_ACCEPT == a) "ACCEPT" else "REJECT"
@@ -429,13 +492,104 @@ class WatchLinkService : Service(), BleServer.Listener {
 
     private fun refreshState() {
         if (!::ble.isInitialized) return
-        PhoneStore.setConnected(ble.subscribedLinks().isNotEmpty())
+        val connected = ble.subscribedLinks().isNotEmpty()
+        PhoneStore.setConnected(connected)
+        if (connected) {
+            clearPhoneLeft("reconnected")
+            linkWasConnected = true
+        } else {
+            if (linkWasConnected) startPhoneLeftWatch()
+            linkWasConnected = false
+        }
         if (ble.links.isNotEmpty()) {
             val sub = ble.subscribedLinks().size
             ui(if (sub > 0) "connected" else "connecting", null)
         } else if (ble.isAdvertising()) {
             ui("advertising", null)
         }
+    }
+
+    /**
+     * The Gadgetbridge link dropped while the watch was worn: watch the step counter for [PhoneLeftAlert]'s
+     * window. Off by setting, not worn, or no step counter leaves nothing to arm.
+     */
+    private fun startPhoneLeftWatch() {
+        val enabled = PhoneLeftAlert.enabled(secure(PhoneLeftAlert.SETTING_KEY))
+        if (!enabled) {
+            Log.i(TAG, "PHONE_LEFT off (setting)")
+            return
+        }
+        val worn = if (::sleep.isInitialized) sleep.wornNow() else true
+        if (!worn) {
+            Log.i(TAG, "PHONE_LEFT not armed (watch not worn)")
+            return
+        }
+        val total = if (::sensors.isInitialized) sensors.stepTotal() else -1L
+        if (total < 0) {
+            Log.i(TAG, "PHONE_LEFT not armed (no step counter)")
+            return
+        }
+        phoneLeftPending = true
+        phoneLeftFired = false
+        phoneLeftAt = log.now()
+        phoneLeftStepBase = total
+        phoneLeftWorn = worn
+        phoneLeftEnabled = enabled
+        Log.i(TAG, "PHONE_LEFT armed: " + PhoneLeftAlert.MIN_STEPS + " steps in "
+                + PhoneLeftAlert.WINDOW_MS / 60_000 + " min")
+    }
+
+    /** Step-counter observation: fire once if the user has walked far enough while the link stayed down. */
+    private fun maybePhoneLeft(total: Long) {
+        if (!phoneLeftPending || phoneLeftFired) return
+        val elapsed = log.now() - phoneLeftAt
+        if (elapsed < 0 || elapsed > PhoneLeftAlert.WINDOW_MS) {
+            phoneLeftPending = false
+            return
+        }
+        val steps = if (total < 0 || phoneLeftStepBase < 0) 0 else Math.max(0L, total - phoneLeftStepBase)
+        val connected = ::ble.isInitialized && ble.subscribedLinks().isNotEmpty()
+        // The setting is read once the step threshold is reached, not on every step.
+        val enabled = if (steps >= PhoneLeftAlert.MIN_STEPS) {
+            PhoneLeftAlert.enabled(secure(PhoneLeftAlert.SETTING_KEY))
+        } else {
+            phoneLeftEnabled
+        }
+        if (!PhoneLeftAlert.shouldAlert(
+                connected,
+                phoneLeftWorn,
+                Math.min(steps, Int.MAX_VALUE.toLong()).toInt(),
+                elapsed,
+                phoneLeftFired,
+                enabled,
+            )
+        ) return
+        phoneLeftPending = false
+        phoneLeftFired = true
+        val n = Notification.Builder(this, CH_PHONE_LEFT)
+            .setSmallIcon(R.drawable.circa_ic_notifications)
+            .setContentTitle("Phone left behind?")
+            .setContentText("Lost connection to your phone")
+            .setCategory(Notification.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(TAG_PHONE_LEFT, 1, n)
+        Log.i(TAG, "PHONE_LEFT alert after " + elapsed / 1000 + " s, " + steps + " steps")
+        if (theaterModeOn()) {
+            Log.i(TAG, "PHONE_LEFT buzz skipped (theater mode)")
+            return
+        }
+        vib.vibrate(VibrationEffect.createWaveform(PhoneLeftAlert.VIBRATION, -1), notificationVibration)
+    }
+
+    /** A reconnect ends the disconnection: disarm the watch and clear its notification. */
+    private fun clearPhoneLeft(why: String) {
+        if (phoneLeftPending || phoneLeftFired) Log.i(TAG, "PHONE_LEFT cleared ($why)")
+        phoneLeftPending = false
+        phoneLeftFired = false
+        phoneLeftStepBase = -1L
+        phoneLeftEnabled = false
+        nm.cancel(TAG_PHONE_LEFT, 1)
     }
 
     // ---- BleServer.Listener ----
@@ -491,6 +645,7 @@ class WatchLinkService : Service(), BleServer.Listener {
                 if (Math.abs(delta) > 60_000) {
                     log.lastClosedEnd = 0
                     nextHrSampleAt = 0
+                    hrAlertSamples.clear()   // the stored sample times belong to the old clock domain
                     scheduleBucket()
                     scheduleHrSample()
                 }
@@ -518,12 +673,7 @@ class WatchLinkService : Service(), BleServer.Listener {
                 r["status"] = false
                 send(l, r)
             }
-            "notify" -> showNotification(m)
-            "notify-" -> {
-                val id = Proto.num(m, "id", 0)
-                nm.cancel(TAG_GB, id.toInt())
-                Log.i(TAG, "NOTIFY removed id=$id")
-            }
+            "notify", "notify-", "canned_responses_sync" -> onNotifyLine(t, m)
             "call" -> onCall(m)
             "find" -> if (Proto.bool(m, "n", false)) startFind() else stopFind()
             // Phone data for the Circa apps (PhoneStore -> PhoneDataProvider). Same parser as the DEBUG_GB_LINE receiver.
@@ -665,10 +815,10 @@ class WatchLinkService : Service(), BleServer.Listener {
     }
 
     /** Runs on the handler thread; false when no GB link is subscribed. */
-    private fun sendToSubscribed(m: Map<String, Any?>): Boolean {
+    private fun sendToSubscribed(m: Map<String, Any?>, quiet: Boolean = false): Boolean {
         if (!::ble.isInitialized) return false
         val ls = ble.subscribedLinks()
-        for (l in ls) send(l, m)
+        for (l in ls) send(l, m, quiet)
         return ls.isNotEmpty()
     }
 
@@ -679,9 +829,10 @@ class WatchLinkService : Service(), BleServer.Listener {
     }
 
     /** One line, framed like Bangle's gbSend: "\r\n" + json + "\r\n" (spec §2.6: the trailing \r is mandatory). */
-    private fun send(l: BleServer.Link, m: Map<String, Any?>) {
+    private fun send(l: BleServer.Link, m: Map<String, Any?>, quiet: Boolean = false) {
         val j = JsonOut.encode(m)
-        logOut(l, j)
+        // quiet: a reply's text must not land in logcat; log its summary (length only) instead.
+        logOut(l, if (quiet) NotifActions.summary(m) else j)
         ble.sendBytes(l, BleServer.ascii("\r\n" + j + "\r\n"))
     }
 
@@ -786,8 +937,84 @@ class WatchLinkService : Service(), BleServer.Listener {
         return bmp
     }
 
+    /** `notify`, `notify-` and `canned_responses_sync`, from GB or the DEBUG_GB_LINE hook. Service thread. */
+    private fun onNotifyLine(t: String, m: Map<String, Any?>) {
+        when (t) {
+            "notify" -> showNotification(m)
+            "notify-" -> {
+                val id = Proto.num(m, "id", 0)
+                nm.cancel(TAG_GB, id.toInt())
+                gbHandles.onDelete(id)
+                lastNotify.remove(id)
+                Log.i(TAG, "NOTIFY removed id=$id")
+            }
+            "canned_responses_sync" -> {
+                val list = CannedReplies.parse(m)
+                getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE).edit()
+                    .putString(KEY_CANNED, CannedReplies.encode(list)).apply()
+                Log.i(TAG, "canned replies synced: " + list.size + (if (list.isEmpty()) " (defaults offered)" else ""))
+            }
+        }
+    }
+
+    private fun cannedReplies(): List<String> = CannedReplies.effective(
+        CannedReplies.decode(getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE).getString(KEY_CANNED, null)))
+
+    /**
+     * A reply or action tapped on the watch, to GB. Not connected: the card is reposted silently with a "Not sent"
+     * line and keeps its actions, so it can be tried again. The reply text is logged only as its length (set
+     * `log.tag.WatchLink` to DEBUG to see the whole line).
+     */
+    private fun deliverNotifAction(id: Long, m: Map<String, Any?>) {
+        val ok = sendToSubscribed(m, quiet = true)
+        Log.i(TAG, "user action on watch notification id=$id -> " + NotifActions.summary(m)
+                + (if (ok) "" else " dropped (not connected)"))
+        if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "OUT.full " + JsonOut.encode(m))
+        if (!ok) lastNotify[id]?.let { postGbNotification(it, alert = false, status = "Not sent: phone not connected") }
+    }
+
     private fun showNotification(m: Map<String, Any?>) {
-        val id = Proto.num(m, "id", 0)
+        val spec = NotifActions.parse(m)
+        val id = spec.id
+        val lost = gbHandles.onNotify(id, spec.reply, spec.actions.isNotEmpty())
+        lastNotify.remove(id)
+        lastNotify[id] = m
+        val (head, text) = notifText(m)
+        // Alert only when this post is new content outside the rate-limit window; the shade always gets the update.
+        val alert = notifyPolicy.decide(id, head, text, SystemClock.elapsedRealtime())
+        postGbNotification(m, alert, null)
+        Log.i(TAG, "NOTIFY posted id=$id alert=$alert reply=" + spec.reply + " actions=" + spec.actions.size
+                + (if (spec.sms) " sms" else ""))
+        ui(null, "notify: " + (head ?: ""))
+        // GB evicted these ids' reply or action handles: repost them silently without what no longer works. Later,
+        // not now: NotificationManagerService sheds posts beyond ~5/s per app, and evictions come with bursts.
+        if (lost.isEmpty()) return
+        staleIds.addAll(lost)
+        h.removeCallbacks(repostStale)
+        h.postDelayed(repostStale, STALE_REPOST_DELAY_MS)
+    }
+
+    /** Ids whose GB handles were evicted, waiting for [repostStale]. Service thread only. */
+    private val staleIds = LinkedHashSet<Long>()
+
+    private val repostStale: Runnable = Runnable {
+        val active = nm.activeNotifications.filter { it.tag == TAG_GB }.map { it.id.toLong() }.toSet()
+        val ids = ArrayList(staleIds)
+        staleIds.clear()
+        for ((n, old) in ids.withIndex()) {
+            if (n >= STALE_REPOSTS_PER_RUN) {   // stay under the post rate limit; the rest go in the next run
+                staleIds.addAll(ids.subList(n, ids.size))
+                h.postDelayed(repostStale, STALE_REPOST_DELAY_MS)
+                break
+            }
+            val om = lastNotify[old] ?: continue
+            if (old.toInt().toLong() !in active) continue
+            postGbNotification(om, alert = false, status = null)
+            Log.i(TAG, "NOTIFY id=$old reposted: GB dropped its reply/action handles")
+        }
+    }
+
+    private fun notifText(m: Map<String, Any?>): Pair<String?, String> {
         val src = Proto.str(m, "src")
         val title = Proto.str(m, "title")
         val subject = Proto.str(m, "subject")
@@ -798,14 +1025,26 @@ class WatchLinkService : Service(), BleServer.Listener {
         val text = StringBuilder()
         if (subject != null && subject.isNotEmpty()) text.append(subject).append('\n')
         if (body != null) text.append(body)
-        // Alert only when this post is new content outside the rate-limit window; the shade always gets the update.
-        val alert = notifyPolicy.decide(id, head, text.toString(), SystemClock.elapsedRealtime())
+        return head to text.toString()
+    }
+
+    /**
+     * Posts (or reposts) one mirrored notification. Its actions: "Reply" first when GB flagged one (a RemoteInput
+     * with the canned replies as choices), then GB's simple actions in GB's order; only those whose GB handles are
+     * still alive ([gbHandles]). [status] is a line shown above the text ("Not sent: ...").
+     */
+    private fun postGbNotification(m: Map<String, Any?>, alert: Boolean, status: String?) {
+        val spec = NotifActions.parse(m)
+        val id = spec.id
+        val src = Proto.str(m, "src")
+        val (head, body) = notifText(m)
+        val text = if (status != null) status + "\n" + body else body
         val b = Notification.Builder(this, CH_NOTIFY)
             .setSmallIcon(R.drawable.circa_ic_notifications)
             .setLargeIcon(avatar(src))
             .setContentTitle(head ?: "Notification")
-            .setContentText(text.toString())
-            .setStyle(Notification.BigTextStyle().bigText(text.toString()))
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
             .setAutoCancel(true)
@@ -813,6 +1052,23 @@ class WatchLinkService : Service(), BleServer.Listener {
             .setOnlyAlertOnce(!alert)
             .setContentIntent(svcPi(ACTION_NOTIF_OPEN, id))
             .setDeleteIntent(svcPi(ACTION_NOTIF_DISMISS, id))
+        if (spec.reply && gbHandles.hasReply(id)) {
+            val ri = RemoteInput.Builder(KEY_REPLY)
+                .setLabel("Reply")
+                .setChoices(cannedReplies().toTypedArray<CharSequence>())
+                .setAllowFreeFormInput(true)
+                .build()
+            b.addAction(Notification.Action.Builder(null, "Reply", actionPi(ACTION_NOTIF_REPLY, id, -1))
+                .addRemoteInput(ri)
+                .setSemanticAction(Notification.Action.SEMANTIC_ACTION_REPLY)
+                .setAllowGeneratedReplies(false)
+                .build())
+        }
+        if (gbHandles.hasActions(id)) {
+            for ((index, title) in NotifActions.shownActions(spec)) {
+                b.addAction(Notification.Action.Builder(null, title, actionPi(ACTION_NOTIF_INVOKE, id, index)).build())
+            }
+        }
         // Show the phone app's own name (substName) instead of WatchLink's package label. "SMS Message" is the
         // phone's SMS app under a name users don't recognise; see NotifIcon.appName.
         NotifIcon.appName(src)?.let { app ->
@@ -820,8 +1076,19 @@ class WatchLinkService : Service(), BleServer.Listener {
         }
         if (!alert) b.setGroup(GROUP_KEY_SILENT).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
         nm.notify(TAG_GB, id.toInt(), b.build())
-        Log.i(TAG, "NOTIFY posted id=$id alert=$alert")
-        ui(null, "notify: " + (head ?: ""))
+    }
+
+    /**
+     * One PendingIntent per (notification, action): the data URI keeps them apart (request codes stay those of
+     * [svcPi]). The reply's is mutable, as RemoteInput fills its results into it; the component is explicit.
+     */
+    private fun actionPi(action: String, id: Long, index: Int): PendingIntent {
+        val i = Intent(this, WatchLinkService::class.java).setAction(action)
+            .setData(Uri.parse("watchlink://notif/$id/$index"))
+            .putExtra("id", id)
+            .putExtra("index", index)
+        val mut = if (ACTION_NOTIF_REPLY == action) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getService(this, 0, i, mut or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun onCall(m: Map<String, Any?>) {
@@ -902,11 +1169,11 @@ class WatchLinkService : Service(), BleServer.Listener {
                 VibrationEffect.createWaveform(
                     longArrayOf(0, NavAlert.TURN_ON_MS, NavAlert.TURN_GAP_MS, NavAlert.TURN_ON_MS), -1
                 ),
-                navVibration,
+                notificationVibration,
             )
             else -> vib.vibrate(
                 VibrationEffect.createOneShot(NavAlert.FINISH_MS, VibrationEffect.DEFAULT_AMPLITUDE),
-                navVibration,
+                notificationVibration,
             )
         }
         Log.i(TAG, "NAV $kind buzz distance=" + nav.distanceM + "m action=" + (nav.action ?: "-"))
@@ -1056,11 +1323,84 @@ class WatchLinkService : Service(), BleServer.Listener {
                 + (if (w.lastBpm() > 0) " bpm=" + w.lastBpm() else " no-reading")
                 + (if (hrBatched) " bucket-batched" else ""))
         hrBatched = false
-        // The 5-minute sample (HR + steps so far today) goes to the exercise app's walk/run detection.
-        if (w.lastBpm() > 0) {
+        val bpm = w.lastBpm()
+        if (bpm > 0) {
+            val at = log.now()
+            val total = sensors.stepTotal()
+            HealthStore.onRestingSample(at, bpm, if (total < 0) -1 else log.openSteps(total))
+            onHrAlertSample(at, bpm)
+            // The 5-minute sample (HR + steps so far today) goes to the exercise app's walk/run detection.
             val steps = HealthStore.snapshot().stepsToday()
-            if (steps != null) ExerciseLink.send(this, HealthStore.nowMs(), w.lastBpm(), steps)
+            if (steps != null) ExerciseLink.send(this, HealthStore.nowMs(), bpm, steps)
         }
+    }
+
+    /**
+     * The two newest scheduled samples decide a [HeartAlerts] alert. The buckets are the closed ones covering the
+     * samples plus the open bucket's steps so far; the workout check is the Exercise app's live state.
+     */
+    private fun onHrAlertSample(at: Long, bpm: Int) {
+        hrAlertSamples.add(HeartAlerts.Sample(at, bpm))
+        while (hrAlertSamples.size > MAX_ALERT_SAMPLES) hrAlertSamples.removeAt(0)
+        val high = HeartAlerts.high(secure(HeartAlerts.SETTING_HIGH))
+        val low = HeartAlerts.low(secure(HeartAlerts.SETTING_LOW))
+        val alert = HeartAlerts.decide(
+            hrAlertSamples,
+            alertBuckets(at),
+            if (::sleep.isInitialized) sleep.wornNow() else true,
+            exercise.activeKind() != null,
+            high,
+            low,
+            lastHighAlertMs,
+            lastLowAlertMs,
+            at,
+        ) ?: return
+        // Inactivity cannot be established without a step-counter value; a low alert does not need one.
+        if (alert.kind == HeartAlerts.Kind.HIGH && sensors.stepTotal() < 0) return
+        if (alert.kind == HeartAlerts.Kind.HIGH) {
+            lastHighAlertMs = at
+            alertPrefs.edit().putLong(KEY_LAST_HIGH, at).apply()
+        } else {
+            lastLowAlertMs = at
+            alertPrefs.edit().putLong(KEY_LAST_LOW, at).apply()
+        }
+        showHeartAlert(alert)
+    }
+
+    private fun alertBuckets(now: Long): List<HeartAlerts.StepBucket> {
+        val out = ArrayList<HeartAlerts.StepBucket>()
+        for (r in log.since(now - 2 * Buckets.BUCKET_MS)) out.add(HeartAlerts.StepBucket(r.ts, r.steps))
+        if (::sensors.isInitialized) {
+            val total = sensors.stepTotal()
+            if (total >= 0) out.add(HeartAlerts.StepBucket(Buckets.nextBoundary(now), log.openSteps(total)))
+        }
+        return out
+    }
+
+    private fun showHeartAlert(alert: HeartAlerts.Alert) {
+        val high = alert.kind == HeartAlerts.Kind.HIGH
+        val n = Notification.Builder(this, CH_HR_ALERTS)
+            .setSmallIcon(R.drawable.circa_ic_heart)
+            .setContentTitle(if (high) "High heart rate" else "Low heart rate")
+            .setContentText(
+                if (high) "${alert.bpm} bpm while resting for 10 min" else "${alert.bpm} bpm for 10 min",
+            )
+            .setCategory(Notification.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(TAG_HR_ALERT, 1, n)
+        Log.i(TAG, "HR alert " + alert.kind + " bpm=" + alert.bpm)
+        if (theaterModeOn()) {
+            Log.i(TAG, "HR alert buzz skipped (theater mode)")
+            return
+        }
+        vib.vibrate(VibrationEffect.createWaveform(HeartAlerts.VIBRATION, -1), notificationVibration)
+    }
+
+    private fun secure(key: String): String? = try {
+        Settings.Secure.getString(contentResolver, key)
+    } catch (e: Exception) {
+        null
     }
 
     private fun scheduleBucket() {
@@ -1209,11 +1549,21 @@ class WatchLinkService : Service(), BleServer.Listener {
         const val ACTION_START = "org.circa.watchlink.START"
         const val ACTION_STOP = "org.circa.watchlink.STOP"
         const val ACTION_BUCKET = "org.circa.watchlink.BUCKET"
+        const val ACTION_SMART_TICK = "org.circa.watchlink.SMART_TICK"
         const val ACTION_HR_SAMPLE = "org.circa.watchlink.HR_SAMPLE"
         const val ACTION_NOTIF_OPEN = "org.circa.watchlink.NOTIF_OPEN"
         const val ACTION_NOTIF_DISMISS = "org.circa.watchlink.NOTIF_DISMISS"
         const val ACTION_CALL_ACCEPT = "org.circa.watchlink.CALL_ACCEPT"
         const val ACTION_CALL_REJECT = "org.circa.watchlink.CALL_REJECT"
+        const val ACTION_NOTIF_REPLY = "org.circa.watchlink.NOTIF_REPLY"
+        const val ACTION_NOTIF_INVOKE = "org.circa.watchlink.NOTIF_INVOKE"
+
+        /** RemoteInput result key of the "Reply" action. */
+        const val KEY_REPLY = "reply"
+        const val PREFS_NOTIF = "notif"
+        const val KEY_CANNED = "canned_replies"
+        const val STALE_REPOST_DELAY_MS = 1500L
+        const val STALE_REPOSTS_PER_RUN = 3
 
         /** Sent by MainActivity on resume: while it is in the foreground, try to add the health FGS type if missing. */
         const val ACTION_ENSURE_HEALTH = "org.circa.watchlink.ENSURE_HEALTH"
@@ -1240,6 +1590,8 @@ class WatchLinkService : Service(), BleServer.Listener {
         const val CH_SERVICE = "service"
         const val CH_NOTIFY = "phone_notifications_v2"
         const val CH_CALL = "phone_calls"
+        const val CH_HR_ALERTS = "heart_rate_alerts"
+        const val CH_PHONE_LEFT = "phone_left_behind"
         const val CH_NOTIFY_LEGACY = "phone_notifications"
 
         /**
@@ -1252,11 +1604,33 @@ class WatchLinkService : Service(), BleServer.Listener {
         const val FGS_ID = 1
         const val TAG_GB = "gb"
         const val TAG_CALL = "call"
+        const val TAG_HR_ALERT = "hr_alert"
+        const val TAG_PHONE_LEFT = "phone_left"
+
+        /** The last-fired times of the heart-rate alerts (WatchLink's clock), so the cooldown survives a restart. */
+        const val PREFS_ALERTS = "alerts"
+        const val KEY_LAST_HIGH = "last_high_ms"
+        const val KEY_LAST_LOW = "last_low_ms"
+
+        /** The two newest samples decide an alert; a few more are kept for the "consecutive" check after a miss. */
+        const val MAX_ALERT_SAMPLES = 6
         const val HELLO_DELAY_MS = 2000L
         const val WEATHER_REFRESH_MS = 60L * 60 * 1000
 
         @Volatile
         private var instance: WatchLinkService? = null
+
+        /** Smart Wake request from Clock ([SmartWakeReceiver]); false when the service is not running. */
+        @JvmStatic
+        fun smartWake(deadlineWallMs: Long, callback: PendingIntent?): Boolean {
+            val s = instance ?: return false
+            if (!s::h.isInitialized) return false
+            s.h.post {
+                if (!s::sleep.isInitialized) return@post
+                if (callback == null) s.sleep.smartCancel() else s.sleep.smartRequest(deadlineWallMs, callback)
+            }
+            return true
+        }
 
         /** DEBUG_GB_LINE: run a listRecs / fetchRec on the service thread; false when the service is not running. */
         @JvmStatic
@@ -1285,6 +1659,15 @@ class WatchLinkService : Service(), BleServer.Listener {
             val s = instance ?: return false
             if (!s::h.isInitialized) return false
             s.h.post { s.onNav(m) }
+            return true
+        }
+
+        /** DEBUG_GB_LINE notify / notify- / canned_responses_sync / call on the service thread; false when not running. */
+        @JvmStatic
+        fun debugNotify(t: String, m: Map<String, Any?>): Boolean {
+            val s = instance ?: return false
+            if (!s::h.isInitialized) return false
+            s.h.post { if (t == "call") s.onCall(m) else s.onNotifyLine(t, m) }
             return true
         }
 
