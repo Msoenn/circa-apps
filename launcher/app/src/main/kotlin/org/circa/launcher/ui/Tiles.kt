@@ -4,6 +4,7 @@ import org.circa.symbols.CircaSymbols
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
@@ -152,7 +153,10 @@ fun HealthTile(controller: LauncherController) {
                         color = dim,
                         fontSize = 12.sp,
                         maxLines = 1,
-                        modifier = Modifier.testTag(HEALTH_RESTING_TAG),
+                        // The fixed-height box leaves this line less than its full height: draw past the bounds
+                        // (not clipped), tucked into the big number's descent space.
+                        overflow = TextOverflow.Visible,
+                        modifier = Modifier.offset(y = (-7).dp).testTag(HEALTH_RESTING_TAG),
                     )
                 }
             }
